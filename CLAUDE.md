@@ -66,6 +66,17 @@ Nesta máquina os dois estão instalados (18/09/2026): LibreOffice 24.2.7
 da numeração do sumário **é** exercitado localmente — se o aviso "sumário sem
 números de página" reaparecer, alguma das duas sumiu do PATH.
 
+## No homeserver
+
+Esta máquina é o homeserver. `docker compose up -d` (na raiz) sobe o container
+`timbrador` (nginx:alpine, `restart: unless-stopped`) servindo `pagina/` em
+**127.0.0.1:8090**, com CSP que proíbe a página de falar com a rede
+(`deploy/nginx.conf`). O volume é a própria pasta `pagina/` do checkout: o que
+estiver no branch atual é o que está no ar. O acesso de fora é por um hostname
+público do túnel Cloudflare (configurado no painel, token no serviço
+`cloudflared`) apontando para `http://localhost:8090`; o HTTPS do túnel é o que
+deixa a página gravar direto na pasta dos documentos.
+
 ## Invariantes
 
 1. **O `marca.json` é a única coisa que varia entre organizações.** Sigla, nome,

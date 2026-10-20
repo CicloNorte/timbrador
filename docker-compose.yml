@@ -1,0 +1,12 @@
+# Serve a página (pagina/) no homeserver. Só em 127.0.0.1: o acesso de fora entra pelo túnel
+# Cloudflare, que dá o HTTPS de que a página precisa para gravar direto na pasta dos documentos.
+services:
+  timbrador:
+    image: nginx:1.27-alpine
+    container_name: timbrador
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:80"
+    volumes:
+      - ./pagina:/usr/share/nginx/html:ro
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
