@@ -23,7 +23,7 @@ Outros comandos: `--ler` e `--atualizar` (documento já timbrado), `--obsoletar`
 
 ## Página no navegador
 
-`pagina/timbrador.html` faz o mesmo sem Python e sem o Claude: abra no Chrome ou no Edge, carregue (ou cole) o `marca.json` com os logos embutidos e solte o arquivo (.docx, .txt, .md) ou cole o texto. A página não tem nenhuma empresa fixa: tudo vem do `marca.json`, que fica guardado no navegador. Gere a versão com logos embutidos com:
+`pagina/timbrador.html` faz o mesmo sem Python e sem o Claude: abra no Chrome ou no Edge, configure a marca em **Marca → Configurar** (organização, empresas com razão social, documento, cidade, cor e logo, áreas e tipos) e solte o arquivo (.docx, .txt, .md) ou cole o texto. A página não tem nenhuma empresa fixa. A marca fica guardada no navegador. **Exportar** baixa o `marca.json` que o Claude e o gerador usam, já com os logos embutidos. **Importar** aceita um `marca.json`; se os logos dele forem caminhos de arquivo, embuta-os antes com:
 
 ```bash
 python3 skills/timbrador/scripts/gerar_documento.py --embutir-logos marca.json --saida marca_portatil.json

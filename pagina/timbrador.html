@@ -77,6 +77,30 @@
   .marca.ligada #marca-estado { color:var(--ok); font-weight:600; }
   #marca-texto { width:100%; min-height:120px; margin-top:6px; font:12px/1.4 ui-monospace,Consolas,monospace; padding:8px; border:1px solid var(--linha); border-radius:8px; box-sizing:border-box; }
   #marca-colar summary { font-weight:400; font-size:13px; }
+  /* Editor da marca: ocupa o lugar do formulário enquanto está aberto. */
+  body.editando #formulario, body.editando #marca-bloco { display:none; }
+  #editor-marca h2 { font-size:17px; margin:0 0 4px; }
+  #editor-marca h3 { font-size:15px; margin:24px 0 4px; }
+  .em-empresa { border:1px solid var(--linha); border-radius:10px; padding:2px 12px 12px; margin:10px 0 0; position:relative; min-width:0; }
+  .em-empresa.e-grupo .so-empresa { display:none; }
+  .em-empresa.inativa { background:#f7f7f8; }
+  button.remover { position:absolute; top:6px; right:6px; width:auto; margin:0; padding:0 6px; border:none; background:none; color:var(--suave); font-size:20px; font-weight:400; }
+  .em-cor { display:flex; gap:6px; align-items:center; }
+  .em-cor input[type=color] { width:44px; height:42px; padding:2px; border:1px solid var(--linha); border-radius:8px; background:#fff; flex:none; }
+  .em-logo { display:flex; gap:10px; align-items:center; margin-top:6px; min-height:42px; }
+  .em-logo img { max-height:40px; max-width:170px; }
+  .em-logo .sem { color:var(--suave); font-size:13px; }
+  .checks { display:grid; grid-template-columns:1fr 1fr; gap:2px 12px; font-size:14px; margin-top:8px; }
+  .checks label { display:flex; gap:6px; align-items:center; font-weight:400; margin:0; }
+  .checks label button { width:auto; margin:0; padding:0 4px; border:none; background:none; color:var(--suave); font-size:16px; }
+  .em-nova { display:grid; grid-template-columns:90px 1fr auto auto; gap:6px; margin-top:10px; align-items:center; }
+  .em-nova.sem-variante { grid-template-columns:90px 1fr auto; }
+  .em-botoes { display:flex; gap:8px; align-items:center; margin-top:26px; }
+  .em-botoes button { margin-top:0; }
+  .em-botoes button.acao { padding:14px 16px; font-size:15px; }
+  .em-flags { display:flex; flex-wrap:wrap; gap:4px 18px; }
+  .em-flags label.check { margin-top:10px; }
+  @media (max-width:480px) { .checks { grid-template-columns:1fr; } .em-nova { grid-template-columns:1fr 1fr; } }
   footer { text-align:center; color:var(--suave); font-size:12px; margin-top:14px; }
   @media (max-width:480px) { .grade { grid-template-columns:1fr; } .cartao { padding:20px; } }
 </style>
@@ -93,17 +117,46 @@
 
     <div class="marca" id="marca-bloco">
       <div class="lista-topo">
-        <span><strong>Marca</strong> <span id="marca-estado">não carregada</span></span>
-        <span class="botoes"><button type="button" class="acao" id="marca-carregar">Carregar marca.json</button></span>
+        <span><strong>Marca</strong> <span id="marca-estado">não configurada</span></span>
+        <span class="botoes"><button type="button" class="acao" id="marca-editar">Configurar</button><button type="button" class="acao" id="marca-exportar" hidden>Exportar</button><button type="button" class="acao" id="marca-carregar">Importar</button></span>
       </div>
-      <div class="dica" id="marca-dica">Empresas, logos, cores, áreas e tipos vêm do marca.json da organização, o mesmo que o Claude usa. Use a versão com os logos embutidos (gerar_documento.py --embutir-logos). Ela fica guardada neste navegador.</div>
+      <div class="dica" id="marca-dica">Configure a organização e as empresas que timbram documentos: nome, razão social, documento, cidade, cor e logo. Fica guardado neste navegador. Para usar em outro computador ou com o Claude, exporte o marca.json; para usar um que já existe, importe.</div>
       <input type="file" id="marca-arquivo" accept=".json,application/json">
       <details id="marca-colar">
-        <summary>Ou cole o conteúdo do marca.json</summary>
+        <summary>Ou cole o conteúdo de um marca.json</summary>
         <textarea id="marca-texto" spellcheck="false" placeholder='{ "organizacao": "…", "empresas": [ … ] }'></textarea>
         <button type="button" class="acao" id="marca-usar">Usar esta marca</button>
       </details>
     </div>
+
+    <section id="editor-marca" hidden>
+      <h2>Marca</h2>
+      <div class="dica">Tudo o que muda de uma organização para outra. Campo em branco sai como [definir] no documento; empresa sem razão social ou documento só emite minuta ou documento em aprovação.</div>
+      <div class="grade">
+        <div><label for="em-organizacao">Organização</label><input type="text" id="em-organizacao" placeholder="Ex.: Grupo Exemplo"></div>
+        <div><label for="em-padrao">Empresa padrão</label><select id="em-padrao"></select></div>
+        <div><label for="em-politica">Código da política</label><input type="text" id="em-politica" placeholder="Ex.: ABC-POL-ADM-001"></div>
+        <div><label for="em-politica-titulo">Título da política</label><input type="text" id="em-politica-titulo" placeholder="Padrão de Documentação Oficial"></div>
+      </div>
+
+      <h3>Empresas</h3>
+      <div class="dica">A sigla abre o código de cada documento (ABC-CI-RH-001/2026). Logo em PNG ou JPEG.</div>
+      <div id="em-empresas"></div>
+      <button type="button" class="acao" id="em-add-empresa" style="margin-top:10px">+ Empresa</button>
+
+      <h3>Áreas</h3>
+      <div class="dica">Marcadas aparecem para documento novo; as demais continuam valendo para ler documento antigo.</div>
+      <div class="checks" id="em-areas"></div>
+      <div class="em-nova sem-variante"><input type="text" id="em-nova-area-sigla" placeholder="Sigla" maxlength="3"><input type="text" id="em-nova-area-nome" placeholder="Nome da área"><button type="button" class="acao" id="em-add-area">+ Área</button></div>
+
+      <h3>Tipos de documento</h3>
+      <div class="dica">Curto: ato pontual, sem capa. Longo: capa, folha de controle e sumário.</div>
+      <div class="checks" id="em-tipos"></div>
+      <div class="em-nova"><input type="text" id="em-novo-tipo-sigla" placeholder="Sigla" maxlength="3"><input type="text" id="em-novo-tipo-nome" placeholder="Nome do tipo"><select id="em-novo-tipo-variante"><option value="curto">Curto</option><option value="longo">Longo</option></select><button type="button" class="acao" id="em-add-tipo">+ Tipo</button></div>
+
+      <div class="em-botoes"><button type="button" id="em-salvar">Salvar marca</button><button type="button" class="acao" id="em-cancelar">Cancelar</button></div>
+      <div class="msg" id="em-msg" aria-live="polite"></div>
+    </section>
 
     <div id="formulario">
 
@@ -1701,7 +1754,7 @@ function organizar(itens) {
 "use strict";
 (function () {
   const $ = id => document.getElementById(id);
-  const guardar = (k, v) => { try { localStorage.setItem("timbrador." + k, v); } catch (e) { /* sem armazenamento */ } };
+  const guardar = (k, v) => { try { localStorage.setItem("timbrador." + k, v); return true; } catch (e) { return false; } };   // false: sem armazenamento ou sem espaço
   const guardado = k => { try { return localStorage.getItem("timbrador." + k) || ""; } catch (e) { return ""; } };
   const msg = (html, classe) => { $("msg").className = "msg " + (classe || ""); $("msg").innerHTML = html; };
   const escH = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -1717,7 +1770,10 @@ function organizar(itens) {
   const addOpt = (sel, valor, texto, grupo) => { const o = document.createElement("option"); o.value = valor; o.textContent = texto; (grupo || sel).appendChild(o); };
   for (const k of ESTADOS_ATIVOS) addOpt($("estado"), k, ESTADOS[k].rotulo);
 
-  /* ------------------------------------------------ marca (marca.json) */
+  /* ------------------------------------------------ marca: editor, importação e exportação
+     A marca configurada aqui é guardada no formato do marca.json (o mesmo do gerador e do Claude) e passa pela
+     mesma validação (carregarMarca); exportar entrega esse arquivo, com os logos embutidos. */
+  let cfgAtual = null;     // a marca em uso, como objeto marca.json
   // Monta as listas da página a partir do cadastro carregado: empresas, tipos e áreas ativos, logo, cor e rodapé.
   function aplicarMarca() {
     const antes = { empresa: $("empresa").value, tipo: $("tipo").value, area: $("area").value || guardado("area") };
@@ -1744,16 +1800,18 @@ function organizar(itens) {
     $("substituido_por").placeholder = `Ex.: ${ORG.padrao}-CI-RH-013/${new Date().getFullYear()}`;
     const incompletas = EMPRESAS_ATIVAS.filter(k => !cadastroCompleto(EMPRESAS[k]));
     $("marca-estado").textContent = `${ORG.organizacao || "sem nome de organização"} · ${EMPRESAS_ATIVAS.length} empresa(s)`;
-    $("marca-dica").textContent = (incompletas.length ? `Só minuta ou em aprovação para ${incompletas.join(", ")}: falta razão social ou documento no marca.json. ` : "") +
-      "Para trocar, carregue ou cole outro marca.json.";
-    $("marca-carregar").textContent = "Trocar marca";
+    $("marca-dica").textContent = (incompletas.length ? `Só minuta ou em aprovação para ${incompletas.join(", ")}: falta razão social ou documento. ` : "") +
+      "Guardada neste navegador. Exporte o marca.json para levar a outro computador ou usar com o Claude.";
+    $("marca-editar").textContent = "Editar";
+    $("marca-exportar").hidden = false;
     $("marca-bloco").classList.add("ligada");
     document.body.classList.remove("sem-marca");
   }
   function usarMarca(texto, guardarNoNavegador) {
     try { carregarMarca(texto); }
     catch (e) { msg(escH(e.message), "erro"); return false; }
-    if (guardarNoNavegador) guardar("marca", texto);
+    cfgAtual = JSON.parse(texto);
+    if (guardarNoNavegador && !guardar("marca", texto)) msg("A marca está em uso, mas não coube no armazenamento do navegador: ao fechar a página, ela se perde. Use logos menores.", "erro");
     aplicarMarca();
     $("marca-colar").open = false; $("marca-texto").value = "";
     atualizarDicas(); mostrarLista();
@@ -1765,6 +1823,174 @@ function organizar(itens) {
     if (usarMarca(await arq.text(), true)) msg(`Marca carregada: ${escH(arq.name)}.`, "ok");
   });
   $("marca-usar").addEventListener("click", () => { if (usarMarca($("marca-texto").value, true)) msg("Marca carregada.", "ok"); });
+  $("marca-exportar").addEventListener("click", () => {
+    if (!cfgAtual) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(cfgAtual, null, 2) + "\n"], { type: "application/json" }));
+    const a = document.createElement("a"); a.href = url; a.download = "marca.json"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  });
+
+  // ---- editor
+  const SEM_VALOR = v => !v || String(v).trim() === INDEFINIDO ? "" : String(v).trim();
+  const emMsg = (texto, classe) => { $("em-msg").className = "msg " + (classe || ""); $("em-msg").textContent = texto; };
+  let emAreas = [], emTipos = [];   // [{sigla, nome, extra, ativa, variante?}]
+  function emEmpresa(e = {}) {
+    const d = document.createElement("fieldset"); d.className = "em-empresa";
+    d.innerHTML = `<button type="button" class="remover" title="Retirar empresa">×</button>
+      <div class="grade">
+        <div><label>Sigla *</label><input type="text" class="e-sigla" maxlength="6" placeholder="ABC"></div>
+        <div><label>Nome (marca) *</label><input type="text" class="e-marca" placeholder="Nome curto"></div>
+      </div>
+      <div class="em-flags">
+        <label class="check"><input type="checkbox" class="e-ativa"><span>Ativa (oferecida para documento novo)</span></label>
+        <label class="check"><input type="checkbox" class="e-grupo"><span>Grupo: documento que vale para várias empresas, com as logos de todas no rodapé</span></label>
+      </div>
+      <div class="so-empresa"><label>Razão social</label><input type="text" class="e-razao" placeholder="Como no cadastro oficial"></div>
+      <div class="grade">
+        <div class="so-empresa"><label>Documento</label><select class="e-rotulo"><option>CNPJ</option><option>CPF</option></select></div>
+        <div class="so-empresa"><label class="e-doc-rot">CNPJ</label><input type="text" class="e-documento" placeholder="00.000.000/0000-00"></div>
+        <div><label>Cidade</label><input type="text" class="e-cidade" placeholder="Cidade – UF"></div>
+        <div><label>Cor</label><div class="em-cor"><input type="color" class="e-cor-sel"><input type="text" class="e-cor" maxlength="7" placeholder="1F3864"></div></div>
+      </div>
+      <label>Logo</label>
+      <div class="em-logo"><img class="e-logo-img" alt="" hidden><span class="sem">sem logo: o rodapé sai só com o filete</span>
+        <button type="button" class="acao e-logo-escolher">Escolher</button><button type="button" class="acao e-logo-tirar" hidden>Tirar</button>
+        <input type="file" class="e-logo-arq" accept="image/png,image/jpeg"></div>`;
+    const q = c => d.querySelector(c);
+    q(".e-sigla").value = e.sigla || ""; q(".e-marca").value = SEM_VALOR(e.marca);
+    q(".e-ativa").checked = e.ativa !== false; q(".e-grupo").checked = !!e.grupo;
+    q(".e-razao").value = SEM_VALOR(e.razao_social); q(".e-rotulo").value = SEM_VALOR(e.documento_rotulo) === "CPF" ? "CPF" : "CNPJ";
+    q(".e-documento").value = SEM_VALOR(e.documento); q(".e-cidade").value = SEM_VALOR(e.cidade);
+    const cor = String(e.cor || "1F3864").replace(/^#+/, "").toUpperCase();
+    q(".e-cor").value = cor; if (/^[0-9A-F]{6}$/.test(cor)) q(".e-cor-sel").value = "#" + cor;
+    const marcar = () => {
+      d.classList.toggle("e-grupo", q(".e-grupo").checked); d.classList.toggle("inativa", !q(".e-ativa").checked);
+      q(".e-doc-rot").textContent = q(".e-rotulo").value;
+      q(".e-documento").placeholder = q(".e-rotulo").value === "CPF" ? "000.000.000-00" : "00.000.000/0000-00";
+      q(".e-logo-img").hidden = !d._logo; q(".sem").hidden = !!d._logo; q(".e-logo-tirar").hidden = !d._logo;
+      if (d._logo) q(".e-logo-img").src = d._logo;
+    };
+    d._logo = e.logo && String(e.logo).startsWith("data:") ? e.logo : null;
+    if (e.logo && !d._logo) d._caminho = e.logo;   // logo em caminho (marca.json do gerador): fica como está
+    q(".e-grupo").addEventListener("change", marcar); q(".e-ativa").addEventListener("change", marcar); q(".e-rotulo").addEventListener("change", marcar);
+    q(".e-cor-sel").addEventListener("input", () => { q(".e-cor").value = q(".e-cor-sel").value.slice(1).toUpperCase(); });
+    q(".e-cor").addEventListener("input", () => { const v = q(".e-cor").value.replace(/^#+/, ""); if (/^[0-9a-fA-F]{6}$/.test(v)) q(".e-cor-sel").value = "#" + v; });
+    q(".e-sigla").addEventListener("input", () => { q(".e-sigla").value = q(".e-sigla").value.toUpperCase(); emPadroes(); });
+    q(".e-marca").addEventListener("input", emPadroes);
+    q(".e-logo-escolher").addEventListener("click", () => q(".e-logo-arq").click());
+    q(".e-logo-tirar").addEventListener("click", () => { d._logo = null; d._caminho = null; marcar(); });
+    q(".e-logo-arq").addEventListener("change", async ev => {
+      const arq = ev.target.files[0]; ev.target.value = ""; if (!arq) return;
+      try {
+        const b = new Uint8Array(await arq.arrayBuffer());
+        const ext = dimImagem(b)[2];
+        let bin = ""; for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+        d._logo = `data:image/${ext};base64,${btoa(bin)}`; d._caminho = null;
+        emMsg(b.length > 400000 ? `Logo de ${Math.round(b.length / 1024)} KB: funciona, mas um arquivo menor deixa a marca leve para guardar e exportar.` : "");
+      } catch (err) { emMsg(`${arq.name}: ${err.message}.`, "erro"); }
+      marcar();
+    });
+    q(".remover").addEventListener("click", () => { d.remove(); emPadroes(); });
+    marcar();
+    $("em-empresas").appendChild(d);
+    return d;
+  }
+  // empresa padrão: só entre as que estão no editor
+  function emPadroes(escolha) {
+    const sel = $("em-padrao"), atual = escolha || sel.value;
+    sel.innerHTML = "";
+    for (const d of $("em-empresas").children) {
+      const sig = d.querySelector(".e-sigla").value.trim();
+      if (sig) addOpt(sel, sig, `${d.querySelector(".e-marca").value.trim() || sig} (${sig})`);
+    }
+    if ([...sel.options].some(o => o.value === atual)) sel.value = atual;
+  }
+  function emChecks(id, itens, rotulo) {
+    const box = $(id); box.innerHTML = "";
+    itens.forEach((it, i) => {
+      const l = document.createElement("label");
+      l.innerHTML = `<input type="checkbox"><span></span>${it.extra ? '<button type="button" title="Retirar">×</button>' : ""}`;
+      l.querySelector("input").checked = it.ativa;
+      l.querySelector("input").addEventListener("change", ev => { it.ativa = ev.target.checked; });
+      l.querySelector("span").textContent = rotulo(it);
+      if (it.extra) l.querySelector("button").addEventListener("click", ev => { ev.preventDefault(); itens.splice(i, 1); emChecks(id, itens, rotulo); });
+      box.appendChild(l);
+    });
+  }
+  const emDesenharAreas = () => emChecks("em-areas", emAreas, a => `${a.nome} (${a.sigla})`);
+  const emDesenharTipos = () => emChecks("em-tipos", emTipos, t => `${t.nome} (${t.sigla}) · ${t.variante}`);
+  function abrirEditor() {
+    const c = cfgAtual || { empresas: [{ cor: "1F3864" }] };
+    $("em-organizacao").value = SEM_VALOR(c.organizacao);
+    $("em-politica").value = SEM_VALOR((c.politica || {}).codigo); $("em-politica-titulo").value = SEM_VALOR((c.politica || {}).titulo);
+    $("em-empresas").innerHTML = "";
+    for (const e of c.empresas || []) emEmpresa(e);
+    emPadroes(String(c.empresa_padrao || "").toUpperCase());
+    // áreas: as do padrão (ou a lista própria da marca, "areas") e as extras; tipos: os do padrão e os extras
+    const ativasA = (c.areas_ativas || []).map(x => String(x).toUpperCase()), ativosT = (c.tipos_ativos || []).map(x => String(x).toUpperCase());
+    const baseA = c.areas ? Object.fromEntries(Object.entries(c.areas).map(([k, v]) => [k.toUpperCase(), v])) : AREAS_PADRAO;
+    emAreas = Object.entries(baseA).map(([sigla, nome]) => ({ sigla, nome, extra: false }))
+      .concat(Object.entries(c.areas_extra || {}).map(([k, nome]) => ({ sigla: k.toUpperCase(), nome, extra: true })));
+    emAreas.forEach(a => { a.ativa = !ativasA.length || ativasA.includes(a.sigla); });
+    emTipos = [...Object.entries(TIPOS_CURTOS_PADRAO).map(([sigla, nome]) => ({ sigla, nome, variante: "curto" })),
+      ...Object.entries(TIPOS_LONGOS_PADRAO).map(([sigla, nome]) => ({ sigla, nome, variante: "longo" })),
+      ...Object.entries(c.tipos_extra || {}).map(([k, d]) => ({ sigla: k.toUpperCase(), nome: (d && d.nome) || k, variante: d && d.variante === "longo" ? "longo" : "curto", extra: true }))];
+    emTipos.forEach(t => { t.ativa = !ativosT.length || ativosT.includes(t.sigla); });
+    emDesenharAreas(); emDesenharTipos();
+    emMsg("");
+    $("editor-marca").hidden = false; document.body.classList.add("editando");
+    $("em-organizacao").focus();
+  }
+  function fecharEditor() { $("editor-marca").hidden = true; document.body.classList.remove("editando"); }
+  // Monta o marca.json a partir do editor. Campos que o editor não mostra (comentários, "areas") passam como estavam.
+  function cfgDoEditor() {
+    const base = cfgAtual ? JSON.parse(JSON.stringify(cfgAtual)) : {};
+    for (const k of ["organizacao", "empresa_padrao", "politica", "empresas", "areas_extra", "tipos_extra", "areas_ativas", "tipos_ativos"]) delete base[k];
+    const v = id => $(id).value.trim(), ou = x => x || INDEFINIDO;
+    const empresas = [...$("em-empresas").children].map(d => {
+      const q = c => d.querySelector(c).value.trim(), grupo = d.querySelector(".e-grupo").checked;
+      const e = { sigla: q(".e-sigla").toUpperCase(), marca: q(".e-marca") || q(".e-sigla").toUpperCase() };
+      if (!grupo) Object.assign(e, { razao_social: ou(q(".e-razao")), documento_rotulo: q(".e-rotulo"), documento: ou(q(".e-documento")) });
+      Object.assign(e, { cidade: ou(q(".e-cidade")), cor: q(".e-cor").replace(/^#+/, "").toUpperCase() });
+      if (d._logo || d._caminho) e.logo = d._logo || d._caminho;
+      if (grupo) e.grupo = true;
+      if (!d.querySelector(".e-ativa").checked) e.ativa = false;
+      return e;
+    });
+    return { organizacao: v("em-organizacao"), empresa_padrao: $("em-padrao").value,
+      politica: { codigo: v("em-politica"), titulo: v("em-politica-titulo") || "Padrão de Documentação Oficial" },
+      empresas,
+      areas_extra: Object.fromEntries(emAreas.filter(a => a.extra).map(a => [a.sigla, a.nome])),
+      tipos_extra: Object.fromEntries(emTipos.filter(t => t.extra).map(t => [t.sigla, { nome: t.nome, variante: t.variante }])),
+      areas_ativas: emAreas.filter(a => a.ativa).map(a => a.sigla),
+      tipos_ativos: emTipos.filter(t => t.ativa).map(t => t.sigla), ...base };
+  }
+  function salvarEditor() {
+    const cfg = cfgDoEditor();
+    const sem = cfg.empresas.find(e => !e.sigla);
+    if (!cfg.empresas.length) return emMsg("Cadastre ao menos uma empresa.", "erro");
+    if (sem) return emMsg("Toda empresa precisa de sigla (2 a 6 letras ou números).", "erro");
+    if (!cfg.areas_ativas.length) return emMsg("Marque ao menos uma área.", "erro");
+    if (!cfg.tipos_ativos.length) return emMsg("Marque ao menos um tipo de documento.", "erro");
+    const texto = JSON.stringify(cfg, null, 2);
+    try { carregarMarca(texto); } catch (e) { return emMsg(e.message.replace(/^marca\.json: /, ""), "erro"); }
+    fecharEditor();
+    if (usarMarca(texto, true) && $("msg").className !== "msg erro") msg("Marca salva neste navegador.", "ok");
+  }
+  function emNovo(siglaId, nomeId, lista, desenhar, extra) {
+    const sigla = $(siglaId).value.trim().toUpperCase(), nome = $(nomeId).value.trim();
+    if (!/^[A-Z]{2,3}$/.test(sigla)) return emMsg("A sigla tem 2 ou 3 letras (sem acento nem número): ela entra no código do documento.", "erro");
+    if (!nome) return emMsg("Informe o nome.", "erro");
+    if (lista.some(x => x.sigla === sigla)) return emMsg(`A sigla ${sigla} já existe.`, "erro");
+    lista.push({ sigla, nome, extra: true, ativa: true, ...extra });
+    $(siglaId).value = ""; $(nomeId).value = ""; emMsg(""); desenhar();
+  }
+  $("marca-editar").addEventListener("click", abrirEditor);
+  $("em-cancelar").addEventListener("click", () => { fecharEditor(); emMsg(""); });
+  $("em-salvar").addEventListener("click", salvarEditor);
+  $("em-add-empresa").addEventListener("click", () => { const d = emEmpresa({ cor: "1F3864" }); d.querySelector(".e-sigla").focus(); });
+  $("em-add-area").addEventListener("click", () => emNovo("em-nova-area-sigla", "em-nova-area-nome", emAreas, emDesenharAreas, {}));
+  $("em-add-tipo").addEventListener("click", () => emNovo("em-novo-tipo-sigla", "em-novo-tipo-nome", emTipos, emDesenharTipos, { variante: $("em-novo-tipo-variante").value }));
   // Data de hoje no fuso do computador (valueAsDate usaria UTC e viraria o dia às 21h). Enquanto ninguém
   // mexer no campo, ele acompanha o dia: página aberta desde ontem gera com a data de hoje.
   const hojeISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
@@ -2177,7 +2403,7 @@ function organizar(itens) {
     const ext = arquivo.name.toLowerCase().split(".").pop();
     // marca.json solto na página (ou escolhido no lugar do documento): troca a marca
     if (ext === "json") { if (usarMarca(await arquivo.text(), true)) msg(`Marca carregada: ${escH(arquivo.name)}.`, "ok"); return; }
-    if (!MARCA_CARREGADA) return msg("Carregue primeiro o marca.json da organização.", "erro");
+    if (!MARCA_CARREGADA) return msg("Configure primeiro a marca da organização (botão Configurar, acima).", "erro");
     conteudo = null; anterior = null; $("gerar").disabled = true; msg("Lendo o arquivo…");
     try {
       let lido;
@@ -2274,7 +2500,7 @@ function organizar(itens) {
   usarEnvolvidos([], false);
 
   // marca da última vez, guardada neste navegador
-  { const m = guardado("marca"); if (m) { try { carregarMarca(m); aplicarMarca(); atualizarDicas(); mostrarLista(); } catch (e) { msg("A marca guardada neste navegador não vale mais: " + escH(e.message) + " Carregue o marca.json de novo.", "erro"); } } }
+  { const m = guardado("marca"); if (m) { try { carregarMarca(m); cfgAtual = JSON.parse(m); aplicarMarca(); atualizarDicas(); mostrarLista(); } catch (e) { msg("A marca guardada neste navegador não vale mais: " + escH(e.message) + " Carregue o marca.json de novo.", "erro"); } } }
 
   // texto colado: pela caixa "Ou cole o texto aqui" ou com Ctrl+V em qualquer parte da página fora dos campos
   function carregarTexto(texto) {

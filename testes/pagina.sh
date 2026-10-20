@@ -15,7 +15,16 @@ specs=("$raiz/testes/espec-curto.json" "$raiz/testes/espec-longo.json")
 node "$raiz/testes/pagina.js" "$saida/marca.json" "$saida/pagina" "${specs[@]}" >/dev/null || { echo "  FALHA página não gerou"; exit 1; }
 # sem LibreOffice para o gerador: a página não numera o sumário, então o gerador também não
 for s in "${specs[@]}"; do TIMBRADOR_SOFFICE=false python3 "$ger" "$s" --marca "$raiz/testes/marca.teste.json" --saida "$saida/gerador" >/dev/null; done
+# marca configurada pelo editor da página (exportada): tem de dar os mesmos documentos
+node "$raiz/testes/pagina_editor.js" "$raiz/skills/timbrador/assets/logo-exemplo.png" "$saida/editor" > "$saida/editor.log" 2>&1 \
+  || { echo "  FALHA editor da marca"; sed 's/^/        /' "$saida/editor.log"; exit 1; }
+node "$raiz/testes/pagina.js" "$saida/editor/marca-exportada.json" "$saida/editor/pagina" "${specs[@]}" >/dev/null || { echo "  FALHA página com a marca do editor"; exit 1; }
 falhas=0
+for f in "$saida"/editor/pagina/*.docx; do
+  n="$(basename "$f")"
+  if python3 "$raiz/testes/comparar_docx.py" "$f" "$saida/gerador/$n" > "$saida/.log"; then echo "  ok    marca do editor: $n"
+  else echo "  FALHA marca do editor: $n"; sed 's/^/        /' "$saida/.log"; falhas=$((falhas + 1)); fi
+done
 for f in "$saida"/pagina/*.docx; do
   n="$(basename "$f")"
   if python3 "$raiz/testes/comparar_docx.py" "$f" "$saida/gerador/$n" > "$saida/.log"; then echo "  ok    $n"

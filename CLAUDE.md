@@ -52,7 +52,7 @@ python3 skills/timbrador/scripts/gerar_documento.py --embutir-logos marca.json -
 python3 skills/timbrador/scripts/gerar_documento.py --ler|--atualizar|--obsoletar DOCX --marca marca.json ...
 python3 skills/timbrador/scripts/gerar_documento.py --inventariar PASTA --marca marca.json [--conferir]
 bash testes/fumaca.sh        # marca, curto/longo, travas, grupo, CPF, ciclo de vida, lista mestra, PDF, XML
-bash testes/pagina.sh        # página × gerador, pacote parte a parte (precisa de node + jsdom; pula sem eles)
+bash testes/pagina.sh        # página × gerador e editor da marca, pacote parte a parte (precisa de node + jsdom; pula sem eles)
 ```
 
 LibreOffice e `pdftotext` são **opcionais**: com eles o gerador converte para
@@ -118,7 +118,12 @@ Python embutido divergiam, **o gerador venceu nos sete pontos** (ver seção 4 d
   renderiza), bloco `figura` (vira aviso). Logo só em data URI (`--embutir-logos`).
 - Leitura, lista mestra, inventário e pastas continuam os da página original,
   com siglas genéricas (`[A-Z0-9]{2,6}`) e ficha `…timbrador:ficha`.
-- A marca fica no `localStorage` do navegador (`timbrador.marca`).
+- A marca é configurada na própria página (Marca → Configurar/Editar: organização,
+  política, empresas com logo por upload, áreas e tipos ativos e extras) e fica no
+  `localStorage` (`timbrador.marca`) **no formato do marca.json**, validada por
+  `carregarMarca`. Exportar baixa esse `marca.json` (logos em data URI), que
+  serve direto ao gerador; Importar/colar aceita um. Campos que o editor não
+  mostra (`areas`, `_instrucoes`) passam intactos.
 
 `Inventariar.ps1` e os `.cmd` também foram portados (20/10/2026): empresa
 padrão, nome da organização, código da política e tipos extras vêm do
