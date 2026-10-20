@@ -20,3 +20,16 @@ python3 skills/timbrador/scripts/gerar_documento.py especificacao.json --marca m
 ```
 
 Outros comandos: `--ler` e `--atualizar` (documento já timbrado), `--obsoletar`, `--lista PASTA` (reserva e registra o número na publicação) e `--inventariar PASTA`. O formato da especificação está em `skills/timbrador/SKILL.md` (seção 6). Requer só Python 3.8+. LibreOffice e `pdftotext` são opcionais: numeram o sumário e geram o PDF de conferência (`TIMBRADOR_SOFFICE` define outro comando para o LibreOffice).
+
+## Página no navegador
+
+`pagina/timbrador.html` faz o mesmo sem Python e sem o Claude: abra no Chrome ou no Edge, carregue (ou cole) o `marca.json` com os logos embutidos e solte o arquivo (.docx, .txt, .md) ou cole o texto. A página não tem nenhuma empresa fixa: tudo vem do `marca.json`, que fica guardado no navegador. Gere a versão com logos embutidos com:
+
+```bash
+python3 skills/timbrador/scripts/gerar_documento.py --embutir-logos marca.json --saida marca_portatil.json
+```
+
+O documento sai igual ao do gerador. Diferenças só de ambiente: o sumário sai sem números de página (o Word numera ao abrir, quando pergunta se deve atualizar os campos), a escolha automática entre assinaturas em linhas e em tabela é estimada (o gerador renderiza com o LibreOffice) e blocos `figura` não entram (o gerador lê a imagem do disco). Com a pasta dos documentos conectada (Chrome/Edge), a página reserva o número, grava o .docx na pasta do tipo e atualiza o `lista-mestra.json`.
+
+No Windows, `pagina/Abrir-Timbrador.cmd` abre a página no Edge ou no Chrome, e `pagina/Inventariar.cmd` (arraste a pasta dos documentos sobre ele) monta o `lista-mestra.json` do que já existe, sem Python. Deixe o `marca.json` na mesma pasta dos scripts.
+

@@ -63,3 +63,14 @@ da tabela "Quadro" na página e "Tabela" no Python · página não tem checklist
 rótulo do bloco `campos` 3,3 cm na página e 4,0 no Python · sumário só com ≥ 3
 entradas na página · OBSOLETO na página exige `substituido_por` (o Python aceita
 `motivo_obsoleto`) · folha de controle da página sem "Motivo da obsolescência".
+
+**Decisão (20/10/2026): o gerador vence nos sete pontos.** A página portada
+(`pagina/timbrador.html`) passou a montar o .docx com um porte direto do
+gerador: rodapé interno com `titulo_curto`, tabela "Tabela" por padrão (com
+`alinhamento`, legenda e fonte sempre), checklist ☐, rótulo de `campos` 4,0 cm,
+sumário sempre (salvo `"sumario": false`), OBSOLETO com `substituido_por` **ou**
+`motivo_obsoleto` (a página ganhou o campo) e "Motivo da obsolescência" na folha
+de controle. O bloco `gerador-python` foi removido da página: o gerador vive só
+em `skills/timbrador/scripts/`. `bash testes/pagina.sh` confere que os dois
+caminhos produzem o mesmo pacote.
+

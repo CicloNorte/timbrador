@@ -16,7 +16,9 @@ O gerador **é o original** (o Python embutido no `timbrador.html`, recebido em
 20/10/2026), portado para white label: empresas, áreas e tipos ativos vêm do
 `marca.json`; do gerador anterior ficaram só `--marca`, `--checar-marca`,
 `--embutir-logos`, `--pdf`, `TIMBRADOR_SOFFICE` e `documento_rotulo` (CPF).
-**Falta portar a página de navegador** — ver "Próximo passo" abaixo. As
+A página de navegador também foi portada (20/10/2026): `pagina/timbrador.html`,
+sem nenhuma empresa fixa, lendo o mesmo `marca.json` e montando o .docx com um
+porte direto do gerador — o pacote sai igual (`testes/pagina.sh`). As
 divergências que motivaram o porte estão em `docs/divergencias-original.md`.
 
 ## Estrutura
@@ -29,7 +31,10 @@ divergências que motivaram o porte estão em `docs/divergencias-original.md`.
 | `skills/timbrador/scripts/gerar_documento.py` | gerador (original portado), ~2.200 linhas, só stdlib |
 | `skills/timbrador/assets/marca.exemplo.json` | modelo de configuração |
 | `skills/timbrador/assets/logo-exemplo.png` | logo genérico do exemplo |
-| `testes/` | marca e especificações fictícias + teste de fumaça |
+| `pagina/timbrador.html` | página de navegador (porte do original), lê o `marca.json` com logos embutidos |
+| `pagina/Inventariar.ps1` (+ `.cmd`) | inventário da pasta no Windows sem Python; lê o `marca.json` (`-Marca`, `TIMBRADOR_MARCA` ou ao lado do script) |
+| `pagina/Abrir-Timbrador.cmd` | abre a página no Edge ou no Chrome (os que gravam direto na pasta) |
+| `testes/` | marca e especificações fictícias + teste de fumaça + página × gerador |
 | `docs/divergencias-original.md` | original × gerador anterior, item a item |
 | `original/` (fora do git) | pacote recebido: `timbrador.html`, `.cmd`, `.ps1`; tem dados reais |
 
@@ -47,6 +52,7 @@ python3 skills/timbrador/scripts/gerar_documento.py --embutir-logos marca.json -
 python3 skills/timbrador/scripts/gerar_documento.py --ler|--atualizar|--obsoletar DOCX --marca marca.json ...
 python3 skills/timbrador/scripts/gerar_documento.py --inventariar PASTA --marca marca.json [--conferir]
 bash testes/fumaca.sh        # marca, curto/longo, travas, grupo, CPF, ciclo de vida, lista mestra, PDF, XML
+bash testes/pagina.sh        # página × gerador, pacote parte a parte (precisa de node + jsdom; pula sem eles)
 ```
 
 LibreOffice e `pdftotext` são **opcionais**: com eles o gerador converte para
@@ -82,27 +88,37 @@ números de página" reaparecer, alguma das duas sumiu do PATH.
    cláusula, data ou valor.
 5. **Gerador e página andam juntos.** Qualquer mudança de visual, de regra ou de
    formato da marca precisa acontecer nos dois, ou o documento gerado pelo
-   Claude deixa de ser igual ao gerado pela página.
+   Claude deixa de ser igual ao gerado pela página. `testes/pagina.sh` confere.
 
-## Próximo passo: portar a página (`original/timbrador.html`)
+## A página (`pagina/timbrador.html`)
 
-A página tem dois scripts: `nucleo` (JS que repete o gerador: estados, faixa,
-cabeçalho, blocos, montagem do .docx, lista mestra, leitura de .docx/.txt/.md) e
-`interface`. Para o porte:
+Porte de `original/timbrador.html` (fora do git, com dados reais). Decisões do
+usuário (20/10/2026): o bloco `gerador-python` **saiu** da página; onde página e
+Python embutido divergiam, **o gerador venceu nos sete pontos** (ver seção 4 de
+`docs/divergencias-original.md`).
 
-1. Os dados fixos (`EMPRESAS`, `EMPRESAS_ATIVAS`, `AREAS`, `AREAS_ATIVAS`,
-   `TIPOS_ATIVOS`, `LOGOS`, `GRP-POL-ADM-001`, `urn:ciclonorte:timbrador:ficha`,
-   `CN_LOGO|`, siglas em `RE_CODIGO`, título e cor da página) saem do HTML e
-   passam a vir do mesmo `marca.json` (upload ou colado; logos em data URI, como
-   `--embutir-logos` gera). Nenhuma empresa fixa no código.
-2. O bloco `<script id="gerador-python">` deixa de existir na página (o gerador
-   vive em `scripts/`), ou passa a ser cópia exata dele — decidir com o usuário.
-3. Alinhar ao gerador portado: ficha com `urn:timbrador:ficha` (a leitura aceita
-   qualquer `…timbrador:ficha`), logo com `TIMBRADOR_LOGO|`, `documento_rotulo`.
-4. O original diverge de si mesmo em alguns pontos (seção 4 de
-   `docs/divergencias-original.md`): o Python embutido manda em regra e JSON, a
-   página no visual; perguntar ao usuário onde as duas discordarem.
-5. Gerar o mesmo documento pelos dois caminhos e comparar.
+- Núcleo (`<script id="nucleo">`): `carregarMarca()` é o `carregar_marca()` do
+  gerador; montagem (`montar`, `blocos`, estilos, numeração, ficha) é porte
+  linha a linha do Python — mesma ordem de ids, rels, mídia (`img1.png`),
+  `round()` com meio para o par (`arred`), ficha em `json.dumps` (`jsonPy`).
+  Mexeu num, mexa no outro e rode `testes/pagina.sh`.
+- O que não dá para portar: números de página do sumário (o Word atualiza ao
+  abrir), assinatura automática (a página estima a paginação; o gerador
+  renderiza), bloco `figura` (vira aviso). Logo só em data URI (`--embutir-logos`).
+- Leitura, lista mestra, inventário e pastas continuam os da página original,
+  com siglas genéricas (`[A-Z0-9]{2,6}`) e ficha `…timbrador:ficha`.
+- A marca fica no `localStorage` do navegador (`timbrador.marca`).
+
+`Inventariar.ps1` e os `.cmd` também foram portados (20/10/2026): empresa
+padrão, nome da organização, código da política e tipos extras vêm do
+`marca.json`; ficha `…timbrador:ficha`; siglas `[A-Z0-9]{2,6}`. Lista que já
+existe mantém o `lista_mestra`/`padrao` dela (como o gerador). Testado com
+PowerShell 7.4 no Linux contra `gerar_documento.py --inventariar`: lista mestra
+igual (ficha nova e antiga, cabeçalho, nome, Obsoletos pulado). Os `.cmd` estão
+em CRLF (`.gitattributes`).
+
+**Pendente:** a página não foi aberta num navegador real (testada em jsdom e
+conferida em PDF), e o `.ps1` não rodou no Windows PowerShell 5.1.
 
 ## Estado da validação
 
@@ -113,6 +129,12 @@ nome do tipo; `--ler`, `--atualizar`, lista mestra (registro e número
 repetido), `--inventariar --conferir`, `--pdf`; XML bem formado. Conferência
 visual em PDF via LibreOffice em 20/10/2026: capa, folha de controle, sumário
 numerado e página interna do POP; CI do grupo com assinaturas e rodapé de logos.
+
+Página (20/10/2026, `testes/pagina.sh` e jsdom): curto e longo do teste, grupo,
+CPF, empresa incompleta, obsoleto por motivo, estado/tipo/área aposentados,
+assinaturas em linhas e em tabela, e um curto e um longo pela interface
+(texto colado + formulário + Gerar) — pacote igual ao do gerador parte a parte
+e PDFs idênticos pixel a pixel no LibreOffice.
 
 **Não coberto ainda:** `--obsoletar` e a cópia obsoleta automática, inventário
 gravando, `assinatura_formato` automático trocando para tabela, figuras JPEG grandes, tabelas que quebram entre páginas,

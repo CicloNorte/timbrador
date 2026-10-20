@@ -1,0 +1,2438 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timbrador</title>
+<style>
+  :root { --cor:#1F3864; --tinta:#1d1d1f; --suave:#6b6b70; --linha:#dcdcdf; --fundo:#f5f5f7; --erro:#B00020; --ok:#1E7B3C; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--fundo); color:var(--tinta); font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; }
+  main { max-width:560px; margin:40px auto; padding:0 16px; }
+  .cartao { background:#fff; border:1px solid var(--linha); border-radius:14px; padding:28px; }
+  header { text-align:center; margin-bottom:22px; }
+  header img { height:58px; }
+  h1 { font-size:20px; margin:10px 0 2px; }
+  header p { margin:0; color:var(--suave); font-size:14px; }
+  label { display:block; font-weight:600; font-size:14px; margin:18px 0 6px; }
+  .dica { font-weight:400; color:var(--suave); font-size:13px; margin-top:4px; }
+  select, input[type=text], input[type=date], input[type=number] { width:100%; padding:10px 12px; font:inherit; border:1px solid var(--linha); border-radius:8px; background:#fff; color:inherit; }
+  select:focus, input:focus { outline:2px solid var(--cor); outline-offset:1px; }
+  .soltar { border:2px dashed var(--linha); border-radius:12px; padding:26px 16px; text-align:center; cursor:pointer; transition:border-color .15s, background .15s; }
+  .soltar:hover, .soltar.ativo { border-color:var(--cor); background:color-mix(in srgb, var(--cor) 6%, #fff); }
+  .soltar strong { display:block; }
+  .soltar span { color:var(--suave); font-size:13px; }
+  .soltar.cheio strong { color:var(--cor); }
+  input[type=file] { display:none; }
+  details { margin-top:20px; border-top:1px solid var(--linha); padding-top:14px; }
+  summary { cursor:pointer; font-weight:600; font-size:14px; color:var(--suave); }
+  .grade { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+  .grade label { margin-top:14px; }
+  .so-oficial, .so-obsoleto { display:none; }
+  body.oficial .so-oficial, body.obsoleto .so-obsoleto { display:block; }
+  button { width:100%; margin-top:26px; padding:14px; font-family:inherit; font-size:16px; font-weight:600; color:#fff; background:var(--cor); border:0; border-radius:10px; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  .msg { margin-top:16px; font-size:14px; }
+  .msg.erro { color:var(--erro); font-weight:600; }
+  .msg.ok { color:var(--ok); font-weight:600; }
+  .msg ul { margin:6px 0 0; padding-left:20px; color:var(--suave); font-weight:400; }
+  .campo-erro { border-color:var(--erro) !important; }
+  [hidden] { display:none !important; }
+  /* A lista mestra e o campo de número são da publicação: quem só redige nunca os vê. */
+  .lista, .campo-numero { display:none; }
+  body.publicando .lista, body.com-lista .lista, body.publicando .campo-numero { display:block; }
+  .lista { border:1px solid var(--linha); border-radius:10px; padding:10px 12px; margin-bottom:18px; background:#fafafb; font-size:14px; }
+  .lista-topo { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .lista.ligada { border-color:var(--ok); background:#f2f8f4; }
+  body.publicando .lista:not(.ligada) { border-color:#C99700; background:#fdf8ec; }
+  body.publicando .lista:not(.ligada) #lista-estado { color:#8a6a00; font-weight:600; }
+  .lista.ligada #lista-estado { color:var(--ok); font-weight:600; }
+  .lista .dica { margin-top:4px; }
+  .lista .botoes { display:flex; gap:6px; }
+  button.acao { width:auto; margin:0; padding:6px 12px; font-size:13px; font-weight:600; color:var(--cor); background:#fff; border:1px solid var(--linha); border-radius:8px; white-space:nowrap; }
+  button.acao:hover { border-color:var(--cor); }
+  .atualizacao { margin-top:14px; padding:12px 14px; border-left:3px solid #1F5FA8; background:#f1f5fb; border-radius:0 8px 8px 0; font-size:14px; }
+  .atualizacao label { margin-top:12px; }
+  .detectado span { color:var(--suave); }
+  .destino { margin-top:6px; font-weight:600; color:#1F5FA8; }
+  label.check { display:flex; gap:8px; align-items:flex-start; font-weight:400; margin-top:16px; }
+  label.check input { margin-top:4px; }
+  .soltar.pequeno { padding:14px 12px; margin-top:8px; }
+  #cobertura { position:fixed; inset:0; z-index:50; display:none; align-items:center; justify-content:center; pointer-events:none;
+    background:color-mix(in srgb, var(--cor) 12%, transparent); border:4px dashed var(--cor); font-size:22px; font-weight:bold; color:var(--cor); }
+  body.arrastando #cobertura { display:flex; }
+  #colar-bloco { margin-top:8px; font-size:14px; }
+  #bloco-envolvidos { border:1px solid var(--linha); border-radius:10px; padding:12px; margin-top:8px; }
+  .envolvido { display:grid; grid-template-columns:1.5fr 1fr 1fr auto; gap:6px; margin-bottom:6px; }
+  .envolvido input { min-width:0; }
+  .envolvido button { border:none; background:none; color:var(--suave); font-size:18px; cursor:pointer; padding:0 6px; }
+  .envolvidos-topo { display:grid; grid-template-columns:1.5fr 1fr 1fr auto; gap:6px; font-size:12px; color:var(--suave); margin-bottom:4px; }
+  #colar-bloco summary { cursor:pointer; color:var(--suave); }
+  #texto-colado { width:100%; min-height:160px; margin-top:6px; font:inherit; font-size:14px; padding:10px; border:1px solid var(--linha); border-radius:8px; box-sizing:border-box; }
+  .msg a { color:inherit; }
+  /* Sem marca carregada não há o que timbrar: só o bloco da marca aparece. */
+  body.sem-marca #formulario { display:none; }
+  .marca { border:1px solid var(--linha); border-radius:10px; padding:10px 12px; margin-bottom:18px; background:#fafafb; font-size:14px; }
+  body.sem-marca .marca { border-color:#C99700; background:#fdf8ec; }
+  .marca.ligada #marca-estado { color:var(--ok); font-weight:600; }
+  #marca-texto { width:100%; min-height:120px; margin-top:6px; font:12px/1.4 ui-monospace,Consolas,monospace; padding:8px; border:1px solid var(--linha); border-radius:8px; box-sizing:border-box; }
+  #marca-colar summary { font-weight:400; font-size:13px; }
+  footer { text-align:center; color:var(--suave); font-size:12px; margin-top:14px; }
+  @media (max-width:480px) { .grade { grid-template-columns:1fr; } .cartao { padding:20px; } }
+</style>
+</head>
+<body class="sem-marca">
+<div id="cobertura">Solte o arquivo para timbrar</div>
+<main>
+  <div class="cartao">
+    <header>
+      <img id="logo" alt="" hidden>
+      <h1 id="titulo-pagina">Timbrador</h1>
+      <p>Coloca qualquer texto no padrão oficial de documentos da organização. Minuta sai sem número: ele é reservado na publicação, por quem aprova.</p>
+    </header>
+
+    <div class="marca" id="marca-bloco">
+      <div class="lista-topo">
+        <span><strong>Marca</strong> <span id="marca-estado">não carregada</span></span>
+        <span class="botoes"><button type="button" class="acao" id="marca-carregar">Carregar marca.json</button></span>
+      </div>
+      <div class="dica" id="marca-dica">Empresas, logos, cores, áreas e tipos vêm do marca.json da organização, o mesmo que o Claude usa. Use a versão com os logos embutidos (gerar_documento.py --embutir-logos). Ela fica guardada neste navegador.</div>
+      <input type="file" id="marca-arquivo" accept=".json,application/json">
+      <details id="marca-colar">
+        <summary>Ou cole o conteúdo do marca.json</summary>
+        <textarea id="marca-texto" spellcheck="false" placeholder='{ "organizacao": "…", "empresas": [ … ] }'></textarea>
+        <button type="button" class="acao" id="marca-usar">Usar esta marca</button>
+      </details>
+    </div>
+
+    <div id="formulario">
+
+    <div class="lista" id="lista-bloco">
+      <div class="lista-topo">
+        <span><strong>Lista mestra</strong> <span id="lista-estado">sem controle</span></span>
+        <span class="botoes"><button type="button" class="acao" id="lista-inventariar" hidden>Inventariar</button><button type="button" class="acao" id="lista-conectar">Conectar pasta</button></span>
+      </div>
+      <div class="dica" id="lista-dica">O número sai daqui. Conecte a pasta dos documentos para reservar o próximo livre e registrar a publicação.</div>
+      <input type="file" id="lista-arquivo" accept=".json,application/json">
+    </div>
+
+    <label for="empresa">1. Empresa</label>
+    <select id="empresa"></select>
+
+    <label for="arquivo">2. Arquivo</label>
+    <div class="soltar" id="soltar" tabindex="0" role="button">
+      <strong id="soltar-titulo">Clique ou arraste o arquivo aqui</strong>
+      <span id="soltar-dica">Word (.docx), texto (.txt) ou Markdown (.md). Pode soltar em qualquer lugar da tela ou colar com Ctrl+V.</span>
+    </div>
+    <input type="file" id="arquivo" accept=".docx,.txt,.md">
+    <details id="colar-bloco">
+      <summary>Ou cole o texto aqui</summary>
+      <textarea id="texto-colado" placeholder="Cole o texto do documento. A primeira linha curta vira o título; linhas começando com # viram seções, e com - ou 1. viram listas."></textarea>
+      <button type="button" class="acao" id="usar-texto">Usar este texto</button>
+    </details>
+    <div class="atualizacao" id="atualizacao" hidden>
+      <div class="detectado" id="detectado"></div>
+      <div id="bloco-mudanca">
+        <label for="mudanca">Tipo de alteração</label>
+        <select id="mudanca">
+          <option value="conteudo">Mudança de conteúdo (nova versão cheia)</option>
+          <option value="correcao">Só correção, sem mudar regra ou valor</option>
+        </select>
+      </div>
+      <div id="bloco-oque">
+        <label for="o_que_mudou">O que mudou *</label>
+        <input type="text" id="o_que_mudou" placeholder="Ex.: Prazo de reembolso passa de 5 para 10 dias.">
+        <div class="dica">Vai para o histórico de revisões do documento.</div>
+      </div>
+      <div class="destino" id="destino"></div>
+    </div>
+
+    <label for="tipo">3. Tipo de documento</label>
+    <select id="tipo"></select>
+    <div class="dica" id="tipo-dica"></div>
+    <div id="bloco-salvar" hidden>
+      <label for="salvar-em">Salvar em</label>
+      <select id="salvar-em"><option value="">Pasta do tipo</option></select>
+      <div class="dica" id="salvar-dica"></div>
+    </div>
+
+    <label for="estado">4. Estado</label>
+    <select id="estado"></select>
+    <div class="dica" id="estado-dica"></div>
+
+    <label class="check" id="bloco-com-assinatura"><input type="checkbox" id="com_assinatura"><span><strong>Com assinatura</strong>: o documento termina com local, data e a assinatura de cada envolvido</span></label>
+    <div id="bloco-envolvidos" hidden>
+      <div class="envolvidos-topo"><span>Nome</span><span>Cargo</span><span>Papel</span><span></span></div>
+      <div id="envolvidos"></div>
+      <datalist id="papeis"><option value="Elaborou"><option value="Revisou"><option value="Aprovou"><option value="De acordo"><option value="Ciente"><option value="Testemunha"><option value="Contratante"><option value="Contratada"></datalist>
+      <button type="button" class="acao" id="add-envolvido">+ Envolvido</button>
+      <div class="grade" style="margin-top:8px">
+        <div><label for="assinatura_formato">Formato das assinaturas</label>
+          <select id="assinatura_formato"><option value="auto">Automático</option><option value="linhas">Linhas de assinatura</option><option value="tabela">Tabela</option></select></div>
+      </div>
+      <div class="dica">Automático: linhas de assinatura; se elas ficariam sozinhas numa página, saem em tabela (Nome, Cargo, Papel, Assinatura, Data).</div>
+    </div>
+
+    <div class="so-oficial">
+      <div class="grade">
+        <div><label for="aprovado_por">Aprovado por *</label><input type="text" id="aprovado_por"></div>
+        <div><label for="data_aprovacao">Data da aprovação *</label><input type="date" id="data_aprovacao"></div>
+      </div>
+      <div id="bloco-obsoleto-anterior" hidden>
+        <label class="check"><input type="checkbox" id="obsoletar_anterior" checked><span>Gerar também a versão substituída (<strong id="versao-anterior"></strong>) marcada como <strong>obsoleta</strong></span></label>
+        <div id="bloco-original">
+          <div class="soltar pequeno" id="soltar-original" tabindex="0" role="button">
+            <strong id="original-titulo">Arquivo oficial da versão substituída</strong>
+            <span id="original-dica">O .docx original, sem as alterações desta nova versão</span>
+          </div>
+          <input type="file" id="arquivo-original" accept=".docx">
+          <label class="check" id="bloco-retirar" hidden><input type="checkbox" id="retirar_original" checked><span>Retirar da pasta o arquivo oficial anterior (a cópia obsoleta fica em Obsoletos)</span></label>
+        </div>
+      </div>
+    </div>
+    <div class="so-obsoleto">
+      <label for="substituido_por">Substituído por</label><input type="text" id="substituido_por">
+      <label for="motivo_obsoleto">Motivo da obsolescência</label><input type="text" id="motivo_obsoleto" placeholder="Ex.: Procedimento extinto com a mudança do sistema.">
+      <div class="dica">Informe o documento que substitui este ou, se ele foi cancelado sem substituto, o motivo.</div>
+    </div>
+
+    <details id="mais">
+      <summary>Mais opções</summary>
+      <label for="titulo">Título</label><input type="text" id="titulo" placeholder="Vem do arquivo">
+      <div class="grade">
+        <div><label for="area">Área</label><select id="area"></select></div>
+        <div class="campo-numero"><label for="numero">Número <span class="dica">(lista mestra)</span></label><input type="number" id="numero" min="1" placeholder="XXX"></div>
+        <div><label for="versao">Versão</label><input type="text" id="versao" value="1.0"></div>
+        <div><label for="data_emissao">Data de emissão</label><input type="date" id="data_emissao"></div>
+        <div><label for="elaborado_por">Elaborado por</label><input type="text" id="elaborado_por"></div>
+        <div><label for="classificacao">Classificação</label><select id="classificacao"><option>Interno</option><option>Público</option><option>Confidencial</option></select></div>
+      </div>
+    </details>
+
+    <button id="gerar" disabled>Gerar documento timbrado</button>
+    </div>
+    <div class="msg" id="msg" aria-live="polite"></div>
+  </div>
+  <footer>O arquivo é processado no seu computador; nada é enviado para a internet.<br><span id="rodape-padrao"></span></footer>
+</main>
+<script id="nucleo">
+"use strict";
+/* ======================================================================= dados do padrão
+   Porte em JavaScript de skills/timbrador/scripts/gerar_documento.py: o .docx gerado aqui tem de ser igual
+   ao gerado pelo Claude. Qualquer mudança de visual, regra ou formato da marca vale para os dois. */
+const EMU_CM = 360000, TW_CM = 567;
+const INDEFINIDO = "[definir]";
+// Cadastro das empresas, preenchido por carregarMarca() a partir do marca.json. Campo vazio ou "[definir]"
+// vira null: aparece como [definir] e impede o estado OFICIAL.
+const EMPRESAS = {};
+// Empresas oferecidas para documento novo (as com "ativa": false só servem para ler e versionar os antigos).
+const EMPRESAS_ATIVAS = [];
+// Empresas cujas logos formam o rodapé do documento do grupo, na ordem do marca.json.
+const EMPRESAS_DO_GRUPO = [];
+// Logos das empresas: bytes da imagem, largura, altura e formato (png ou jpeg).
+const LOGOS = {};
+let EMP_ID = null, EMPRESA = {};
+// Dados da organização (marca.json): nome, código da política, empresa padrão, áreas e tipos ativos.
+const ORG = { organizacao: "", politica: "", padrao: null, areas_ativas: [], tipos_ativos: [] };
+let MARCA_CARREGADA = false;
+
+function definirEmpresa(chave) {
+  if (!(chave in EMPRESAS)) throw new Error(`Empresa desconhecida: ${chave}. Use uma de: ${Object.keys(EMPRESAS).join(", ")}.`);
+  EMP_ID = chave; EMPRESA = EMPRESAS[chave];
+}
+const dado = c => EMPRESA[c] || INDEFINIDO;
+function identificacaoEmpresa() {
+  if (EMPRESA.grupo) return EMPRESA.marca;
+  const partes = [EMPRESA.razao || EMPRESA.marca, `${EMPRESA.documento_rotulo || "CNPJ"} ${dado("documento")}`];
+  if (EMPRESA.cidade) partes.push(EMPRESA.cidade);
+  return partes.join("  ·  ");
+}
+const ESTADOS = {
+  // Aposentado: fica aqui só para ler e versionar documentos emitidos antes do corte.
+  RASCUNHO:   { cor:"595959", texto:"FFFFFF", marca:"RASCUNHO", claro:"E4E4E4", rotulo:"Rascunho",
+                tarja:"RASCUNHO  ·  DOCUMENTO EM ELABORAÇÃO  ·  SEM VALIDADE OFICIAL", rodape:"Rascunho sem validade oficial. Não distribuir.",
+                dica:"Estado aposentado: serve só para ler documento antigo. Use minuta." },
+  MINUTA:     { cor:"C99700", texto:"000000", marca:"MINUTA", claro:"F6EBC4", rotulo:"Minuta",
+                tarja:"MINUTA  ·  TEXTO PROPOSTO PARA ANÁLISE  ·  SEM VALIDADE OFICIAL", rodape:"Minuta para análise: o texto pode mudar e não produz efeitos até a aprovação.",
+                dica:"Texto completo, enviado para análise ou concordância das partes." },
+  EM_APROVACAO: { cor:"1F5FA8", texto:"FFFFFF", marca:"EM APROVAÇÃO", claro:"D9E5F3", rotulo:"Em aprovação",
+                tarja:"EM APROVAÇÃO  ·  AGUARDANDO DECISÃO  ·  SEM VALIDADE OFICIAL", rodape:"Texto entregue a quem aprova. Sem validade oficial até a aprovação.",
+                dica:"Texto fechado, entregue a quem aprova. Só muda para atender aos ajustes que ele pedir. A versão oficial, se houver, continua valendo até a aprovação." },
+  // Renomeado para EM_APROVACAO: fica só para ler e versionar arquivos com o nome antigo.
+  EM_REVISAO: { cor:"1F5FA8", texto:"FFFFFF", marca:"EM REVISÃO", claro:"D9E5F3", rotulo:"Em revisão",
+                tarja:"EM REVISÃO  ·  AGUARDANDO APROVAÇÃO  ·  SEM VALIDADE OFICIAL", rodape:"Versão submetida à aprovação. Sem validade oficial até a aprovação.",
+                dica:"Nome antigo de em aprovação: serve só para ler documento emitido com esse estado." },
+  OFICIAL:    { cor:"1E7B3C", texto:"FFFFFF", marca:null, claro:null, rotulo:"Oficial",
+                tarja:"DOCUMENTO OFICIAL  ·  VIGENTE", rodape:"Cópia impressa não controlada: confirme a versão vigente.",
+                dica:"Aprovado e vigente. Exige aprovador, data da aprovação e número." },
+  OBSOLETO:   { cor:"B00020", texto:"FFFFFF", marca:"OBSOLETO", claro:"F2D0D5", rotulo:"Obsoleto",
+                tarja:"OBSOLETO  ·  NÃO UTILIZAR", rodape:"Documento obsoleto, mantido apenas para histórico.",
+                dica:"Substituído ou cancelado. Mantido só como histórico. Exige o documento que o substitui ou o motivo." }
+};
+const TIPOS_CURTOS = { CI:"Comunicação Interna", COM:"Comunicado", OFI:"Ofício", DEC:"Declaração", TER:"Termo", ATA:"Ata",
+  RO:"Registro de Ocorrência", AUT:"Autorização", NOT:"Notificação", CTR:"Contrato", PRO:"Proposta", FOR:"Formulário", REC:"Recibo" };
+const TIPOS_LONGOS = { MAN:"Manual", POP:"Procedimento Operacional Padrão", POL:"Política", REG:"Regulamento",
+  REL:"Relatório", PLN:"Plano", PRJ:"Projeto", INS:"Instrução de Trabalho" };
+// Áreas do padrão. O marca.json pode trocar a lista ("areas"), acrescentar ("areas_extra") e dizer quais são
+// oferecidas para documento novo ("areas_ativas"); as demais continuam valendo para ler documento antigo.
+const AREAS_PADRAO = { ADM:"Administrativo", DIR:"Diretoria", FIN:"Financeiro", FIS:"Financeiro e fiscal", JUR:"Jurídico",
+  RH:"Recursos humanos", VEN:"Vendas e comercial", ECO:"E-commerce e marketplaces", EST:"Estoque", EXP:"Expedição",
+  CMP:"Compras", OFC:"Oficina e assistência técnica", MKT:"Marketing", TI:"Tecnologia" };
+const AREAS = { ...AREAS_PADRAO };
+const TIPOS_CURTOS_PADRAO = { ...TIPOS_CURTOS }, TIPOS_LONGOS_PADRAO = { ...TIPOS_LONGOS };
+// O rascunho foi aposentado: a minuta já cobre o texto que ainda não é oficial.
+const ESTADOS_ATIVOS = ["MINUTA", "EM_APROVACAO", "OFICIAL", "OBSOLETO"];
+// Estados aposentados e o que os substitui, ao gerar a rodada seguinte de um arquivo antigo.
+const ESTADO_SUCESSOR = { RASCUNHO: "MINUTA", EM_REVISAO: "EM_APROVACAO" };
+
+const NS = 'xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" ' +
+  'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:o="urn:schemas-microsoft-com:office:office" ' +
+  'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" ' +
+  'xmlns:v="urn:schemas-microsoft-com:vml" xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing" ' +
+  'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:w10="urn:schemas-microsoft-com:office:word" ' +
+  'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" ' +
+  'xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" ' +
+  'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" ' +
+  'mc:Ignorable="w14 wp14"';
+
+/* ======================================================================= marca.json */
+// Largura, altura e formato de um PNG ou JPEG (mesma leitura do gerador).
+function dimImagem(d) {
+  if (d.length > 24 && d[0] === 0x89 && d[1] === 0x50 && d[2] === 0x4E && d[3] === 0x47)
+    return [((d[16] << 24) | (d[17] << 16) | (d[18] << 8) | d[19]) >>> 0, ((d[20] << 24) | (d[21] << 16) | (d[22] << 8) | d[23]) >>> 0, "png"];
+  if (d[0] === 0xFF && d[1] === 0xD8) {
+    const sof = [0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF];
+    let i = 2;
+    while (i + 8 < d.length) {
+      if (d[i] !== 0xFF) { i++; continue; }
+      if (sof.includes(d[i + 1])) return [(d[i + 7] << 8) | d[i + 8], (d[i + 5] << 8) | d[i + 6], "jpeg"];
+      i += 2 + ((d[i + 2] << 8) | d[i + 3]);
+    }
+  }
+  throw new Error("Imagem não suportada (use PNG ou JPEG)");
+}
+// Logo do marca.json: na página, só data URI (base64). Caminho de arquivo é coisa do gerador: --embutir-logos converte.
+function lerLogo(ref, sig) {
+  const s = String(ref);
+  if (!s.startsWith("data:"))
+    throw new Error(`o logo de ${sig} é um caminho de arquivo (${s}), que a página não consegue abrir. Gere uma versão com os logos embutidos: ` +
+      "python3 gerar_documento.py --embutir-logos marca.json --saida marca_portatil.json");
+  const bin = atob(s.split(",", 2)[1] || ""), dados = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) dados[i] = bin.charCodeAt(i);
+  const [w, h, ext] = dimImagem(dados);
+  return { dados, w, h, ext, uri: `data:image/${ext};base64,${s.split(",", 2)[1]}` };
+}
+// Campo do cadastro: vazio ou [definir] vale como não informado.
+const preenchido = v => v === undefined || v === null || ["", INDEFINIDO].includes(String(v).trim()) ? null : String(v).trim();
+const erroMarca = msg => { throw new Error("marca.json: " + msg); };
+// Lê o marca.json (texto ou objeto) e preenche o cadastro: empresas, logos, áreas, tipos e organização.
+function carregarMarca(entrada) {
+  let cfg;
+  try { cfg = typeof entrada === "string" ? JSON.parse(entrada) : entrada; } catch (e) { erroMarca(`não é um JSON válido (${e.message}).`); }
+  if (!cfg || typeof cfg !== "object") erroMarca("não é um objeto JSON.");
+  const emps = cfg.empresas || [];
+  if (!Array.isArray(emps) || !emps.length) erroMarca("a lista 'empresas' está vazia.");
+  const novas = {}, logos = {};
+  for (const e of emps) {
+    const sig = String(e.sigla || "").toUpperCase();
+    if (!/^[A-Z0-9]{2,6}$/.test(sig)) erroMarca(`sigla inválida '${sig}' (2 a 6 letras ou números).`);
+    if (sig in novas) erroMarca(`sigla ${sig} repetida.`);
+    const cor = String(e.cor || "1F3864").replace(/^#+/, "").toUpperCase();
+    if (!/^[0-9A-F]{6}$/.test(cor)) erroMarca(`cor inválida em ${sig} (use hexadecimal, ex.: 1F3864).`);
+    const grupo = !!e.grupo, marca = preenchido(e.marca) || sig;
+    if (e.logo) {
+      try { logos[sig] = lerLogo(e.logo, sig); } catch (ex) { erroMarca(`logo de ${sig} ilegível (${ex.message}).`); }
+    }
+    novas[sig] = { marca, razao: preenchido(e.razao_social) || (grupo ? marca : null), documento: preenchido(e.documento),
+      documento_rotulo: preenchido(e.documento_rotulo) || "CNPJ", cidade: preenchido(e.cidade), cor, grupo,
+      ativa: e.ativa !== false, sem_logo: !(sig in logos) };
+  }
+  const ativas = Object.keys(novas).filter(k => novas[k].ativa);
+  if (!ativas.length) erroMarca("nenhuma empresa ativa.");
+  // áreas e tipos: sempre a partir do padrão, para que trocar de marca não acumule os extras da anterior
+  const areas = cfg.areas ? Object.fromEntries(Object.entries(cfg.areas).map(([k, v]) => [String(k).toUpperCase(), v])) : { ...AREAS_PADRAO };
+  for (const [k, v] of Object.entries(cfg.areas_extra || {})) areas[String(k).toUpperCase()] = v;
+  const curtos = { ...TIPOS_CURTOS_PADRAO }, longos = { ...TIPOS_LONGOS_PADRAO };
+  for (const [s0, d] of Object.entries(cfg.tipos_extra || {})) {
+    const sig = String(s0).toUpperCase();
+    if (!d || typeof d !== "object" || !["curto", "longo"].includes(d.variante))
+      erroMarca(`o tipo extra ${sig} precisa de "nome" e "variante" ('curto' ou 'longo').`);
+    (d.variante === "curto" ? curtos : longos)[sig] = d.nome || sig;
+  }
+  const tipos = { ...curtos, ...longos }, org = {};
+  for (const [chave, todos] of [["areas_ativas", areas], ["tipos_ativos", tipos]]) {
+    const lista = (cfg[chave] && cfg[chave].length ? cfg[chave] : Object.keys(todos)).map(x => String(x).toUpperCase());
+    const fora = lista.filter(x => !(x in todos));
+    if (fora.length) erroMarca(`${chave} cita ${fora.join(", ")}, que não existe(m).`);
+    org[chave] = lista;
+  }
+  const padrao = String(cfg.empresa_padrao || ativas[0]).toUpperCase();
+  if (!(padrao in novas)) erroMarca(`empresa_padrao ${padrao} não está em 'empresas'.`);
+  // tudo validado: só agora troca o cadastro em uso
+  const trocar = (alvo, origem) => { for (const k of Object.keys(alvo)) delete alvo[k]; Object.assign(alvo, origem); };
+  trocar(EMPRESAS, novas); trocar(LOGOS, logos); trocar(AREAS, areas); trocar(TIPOS_CURTOS, curtos); trocar(TIPOS_LONGOS, longos);
+  EMPRESAS_ATIVAS.splice(0, EMPRESAS_ATIVAS.length, ...ativas);
+  EMPRESAS_DO_GRUPO.splice(0, EMPRESAS_DO_GRUPO.length, ...ativas.filter(k => !novas[k].grupo));
+  Object.assign(ORG, org, { organizacao: preenchido(cfg.organizacao) || "", politica: preenchido((cfg.politica || {}).codigo) || "",
+    politica_titulo: preenchido((cfg.politica || {}).titulo) || "", padrao });
+  definirEmpresa(padrao);
+  MARCA_CARREGADA = true;
+}
+const cadastroCompleto = d => d.grupo || !!(d.razao && d.documento);
+
+/* ======================================================================= XML auxiliar */
+const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const I = n => Math.trunc(n);
+// round() do Python: meio vai para o par (18,5 → 18)
+const arred = x => { const f = Math.floor(x), d = x - f; return d > 0.5 || (d === 0.5 && f % 2 !== 0) ? f + 1 : f; };
+const grade = ws => ws.map(w => `<w:gridCol w:w="${w}"/>`).join("");
+
+function rpr(k = {}) {
+  let s = "";
+  if (k.fonte) s += `<w:rFonts w:ascii="${k.fonte}" w:hAnsi="${k.fonte}" w:cs="${k.fonte}"/>`;
+  if (k.b) s += "<w:b/><w:bCs/>";
+  if (k.i) s += "<w:i/><w:iCs/>";
+  if (k.caps) s += "<w:caps/>";
+  if (k.cor) s += `<w:color w:val="${k.cor}"/>`;
+  if (k.esp) s += `<w:spacing w:val="${k.esp}"/>`;
+  if (k.pos) s += `<w:position w:val="${I(k.pos)}"/>`;   // meios-pontos acima da linha de base
+  if (k.sz) s += `<w:sz w:val="${I(k.sz * 2)}"/><w:szCs w:val="${I(k.sz * 2)}"/>`;
+  return s ? `<w:rPr>${s}</w:rPr>` : "";
+}
+function run(texto, k = {}) {
+  return String(texto).split("\t").map((t, n) =>
+    (n ? `<w:r>${rpr(k)}<w:tab/></w:r>` : "") + (t ? `<w:r>${rpr(k)}<w:t xml:space="preserve">${esc(t)}</w:t></w:r>` : "")).join("");
+}
+// **negrito**, *itálico*
+function inline(texto, k = {}) {
+  return String(texto).split(/(\*\*\*.+?\*\*\*|\*\*.+?\*\*|\*[^*\s][^*]*?\*)/).filter(Boolean).map(tok => {
+    if (tok.startsWith("***") && tok.endsWith("***") && tok.length > 6) return run(tok.slice(3, -3), { ...k, b: true, i: true });
+    if (tok.startsWith("**") && tok.endsWith("**")) return run(tok.slice(2, -2), { ...k, b: true });
+    if (tok.startsWith("*") && tok.endsWith("*") && tok.length > 2) return run(tok.slice(1, -1), { ...k, i: true });
+    return run(tok, k);
+  }).join("");
+}
+function campo(instr, cache, k = {}) {
+  const r = rpr(k);
+  return `<w:r>${r}<w:fldChar w:fldCharType="begin"/></w:r><w:r>${r}<w:instrText xml:space="preserve"> ${instr} </w:instrText></w:r>` +
+    `<w:r>${r}<w:fldChar w:fldCharType="separate"/></w:r><w:r>${r}<w:t>${cache}</w:t></w:r><w:r>${r}<w:fldChar w:fldCharType="end"/></w:r>`;
+}
+function par(conteudo = "", o = {}) {
+  let p = "";
+  if (o.estilo) p += `<w:pStyle w:val="${o.estilo}"/>`;
+  if (o.keep) p += "<w:keepNext/>";
+  if (o.quebra) p += "<w:pageBreakBefore/>";
+  if (o.borda) p += `<w:pBdr>${o.borda}</w:pBdr>`;
+  if (o.tabs) p += "<w:tabs>" + o.tabs.map(([v, pos, l]) => `<w:tab w:val="${v}" w:leader="${l}" w:pos="${pos}"/>`).join("") + "</w:tabs>";
+  if (o.antes != null || o.depois != null || o.linha != null)
+    p += `<w:spacing${o.antes != null ? ` w:before="${o.antes}"` : ""}${o.depois != null ? ` w:after="${o.depois}"` : ""}${o.linha != null ? ` w:line="${o.linha}" w:lineRule="auto"` : ""}/>`;
+  if (o.ind) p += `<w:ind ${o.ind}/>`;
+  if (o.jc) p += `<w:jc w:val="${o.jc}"/>`;
+  return `<w:p><w:pPr>${p}${o.sect || ""}</w:pPr>${conteudo}</w:p>`;
+}
+
+const mesmosBytes = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+class Ctx {
+  constructor() { this.docpr = 100; this.zorder = 251660000; this.midia = []; this.rels = {}; this.nums = []; this.sec = [0, 0, 0, 0, 0];
+    this.titulos = []; this.avisos = []; this.cont = { Tabela: 0, Quadro: 0, Figura: 0, "Gráfico": 0 }; }
+  id() { return ++this.docpr; }
+  z() { this.zorder += 10; return this.zorder; }
+  rel(parte, tipo, alvo) {
+    const lst = this.rels[parte] = this.rels[parte] || [];
+    const e = lst.find(x => x[1] === tipo && x[2] === alvo);
+    if (e) return e[0];
+    const rid = `rId${lst.length + 1}`; lst.push([rid, tipo, alvo]); return rid;
+  }
+  // imagem repetida (a mesma logo no rodapé da capa e das páginas internas) entra uma vez só no pacote
+  imagem(parte, dados) {
+    const ext = dimImagem(dados)[2];
+    let m = this.midia.find(([, d]) => mesmosBytes(d, dados));
+    if (!m) { m = [`img${this.midia.length + 1}.${ext === "png" ? "png" : "jpeg"}`, dados]; this.midia.push(m); }
+    return this.rel(parte, "image", `media/${m[0]}`);
+  }
+}
+
+const gImagem = (rid, cx, cy, nome = "img") =>
+  `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="${nome}"/><pic:cNvPicPr/></pic:nvPicPr>` +
+  `<pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${I(cx)}" cy="${I(cy)}"/></a:xfrm>` +
+  `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic>`;
+const SHAPETYPE_136 = '<v:shapetype id="_x0000_t136" coordsize="21600,21600" o:spt="136" adj="10800" path="m@7,l@8,m@5,21600l@6,21600e">' +
+  '<v:formulas><v:f eqn="sum #0 0 10800"/><v:f eqn="prod #0 2 1"/><v:f eqn="sum 21600 0 @1"/><v:f eqn="sum 0 0 @2"/>' +
+  '<v:f eqn="sum 21600 0 @3"/><v:f eqn="if @0 @3 0"/><v:f eqn="if @0 21600 @1"/><v:f eqn="if @0 0 @2"/><v:f eqn="if @0 @4 21600"/>' +
+  '<v:f eqn="mid @5 @6"/><v:f eqn="mid @8 @5"/><v:f eqn="mid @7 @8"/><v:f eqn="mid @6 @7"/><v:f eqn="sum @6 0 @5"/></v:formulas>' +
+  '<v:path textpathok="t" o:connecttype="custom" o:connectlocs="@9,0;@10,10800;@11,21600;@12,10800" o:connectangles="270,180,90,0"/>' +
+  '<v:textpath on="t" fitshape="t"/><v:handles><v:h position="#0,bottomRight" xrange="6629,14971"/></v:handles>' +
+  '<o:lock v:ext="edit" text="t" shapetype="t"/></v:shapetype>';
+
+// Marca d'água nativa do Word (WordArt diagonal atrás do texto), reconhecida também pelo LibreOffice.
+function marcaDagua(ctx, texto, cor) {
+  const w = 470, h = Math.min(130, w / (texto.length * 0.66)), idn = ctx.id();
+  return `<w:r><w:rPr><w:noProof/></w:rPr><w:pict>${SHAPETYPE_136}<v:shape id="PowerPlusWaterMarkObject${idn}" o:spid="_x0000_s${2000 + idn}" type="#_x0000_t136" ` +
+    `style="position:absolute;margin-left:0;margin-top:0;width:${w.toFixed(1)}pt;height:${h.toFixed(1)}pt;rotation:315;z-index:-251654144;` +
+    `mso-position-horizontal:center;mso-position-horizontal-relative:page;mso-position-vertical:center;mso-position-vertical-relative:page" ` +
+    `o:allowincell="f" fillcolor="#${cor}" stroked="f"><v:fill opacity="1"/><v:textpath style="font-family:&quot;Arial&quot;;font-size:1pt;font-weight:bold" string="${esc(texto)}"/>` +
+    `<w10:wrap anchorx="page" anchory="page"/></v:shape></w:pict></w:r>`;
+}
+function textoTarja(spec) {
+  let txt = ESTADOS[spec.estado].tarja;
+  if (spec.estado === "OFICIAL" && spec.vigencia) txt += `  ·  DESDE ${spec.vigencia}`;
+  if (spec.estado === "OBSOLETO" && spec.substituido_por) txt = `OBSOLETO  ·  SUBSTITUÍDO POR ${spec.substituido_por}  ·  NÃO UTILIZAR`;
+  return txt;
+}
+// Faixa do estado: tabela de uma célula no fluxo do cabeçalho, dentro da borda (1,2 cm a 19,8 cm): imprime em qualquer impressora.
+function tarja(spec, margEsqCm) {
+  const est = ESTADOS[spec.estado], larg = I((21 - 2.4) * TW_CM), ind = -I((margEsqCm - 1.2) * TW_CM);
+  const c = par(run(textoTarja(spec), { b: true, sz: 8, cor: est.texto, esp: 10 }), { jc: "center", antes: 0, depois: 0, linha: 240, estilo: "Rodape" });
+  return `<w:tbl><w:tblPr><w:tblW w:w="${larg}" w:type="dxa"/><w:tblInd w:w="${ind}" w:type="dxa"/><w:tblLayout w:type="fixed"/>` +
+    `<w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr>` +
+    `<w:tblGrid>${grade([larg])}</w:tblGrid><w:tr><w:trPr><w:trHeight w:val="${I(0.55 * TW_CM)}" w:hRule="exact"/></w:trPr>` +
+    `<w:tc><w:tcPr><w:tcW w:w="${larg}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${est.cor}"/><w:vAlign w:val="center"/></w:tcPr>${c}</w:tc></w:tr></w:tbl>`;
+}
+const marca = (ctx, spec) => ESTADOS[spec.estado].marca ? marcaDagua(ctx, ESTADOS[spec.estado].marca, ESTADOS[spec.estado].claro) : "";
+function logoInline(ctx, parte, alturaCm, emp = EMP_ID) {
+  const lg = LOGOS[emp];
+  if (!lg) throw new Error(`O marca.json não tem o logo da empresa ${emp} (${EMPRESAS[emp].marca}).`);
+  const cy = alturaCm * EMU_CM, cx = cy * lg.w / lg.h, rid = ctx.imagem(parte, lg.dados);
+  return `<w:r><w:rPr><w:noProof/></w:rPr><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${I(cx)}" cy="${I(cy)}"/>` +
+    `<wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${ctx.id()}" name="Logo" descr="TIMBRADOR_LOGO|${emp}"/><wp:cNvGraphicFramePr/>${gImagem(rid, cx, cy, "logo")}</wp:inline></w:drawing></w:r>`;
+}
+
+const MARG_TIMBRADO = [3.3, 2.0, 3.2, 3.0];   // topo (faixa + controle), direita, base (logo), esquerda (cm)
+const MARG_ABNT = [3.3, 2.0, 2.6, 3.0];
+const _b = l => `<w:${l} w:val="single" w:sz="6" w:space="28" w:color="000000"/>`;
+// Borda fina em todas as páginas, a 1 cm das bordas do papel
+const BORDA_PAGINA = '<w:pgBorders w:offsetFrom="page">' + ["top", "left", "bottom", "right"].map(_b).join("") + "</w:pgBorders>";
+
+// Cabeçalho de todas as páginas: faixa do estado e bloco de controle. Rodapé: filete e logo da empresa.
+const cabecalhoControle = (ctx, spec, margEsq) => tarja(spec, margEsq) + linhasControle(ctx, spec);
+// Rodapé do documento do grupo: as logos de todas as empresas, lado a lado; empresa ainda sem logo aparece
+// pelo nome, em negrito, na cor dela e erguido até o meio da altura das logos.
+const logosDoGrupo = (ctx, parte, alturaCm) => EMPRESAS_DO_GRUPO.map(k => EMPRESAS[k].sem_logo || !LOGOS[k]
+  ? run(EMPRESAS[k].marca, { b: true, sz: arred(alturaCm * 14), cor: EMPRESAS[k].cor, pos: arred(alturaCm * 18.5) })
+  : logoInline(ctx, parte, alturaCm, k)).join(run("  "));
+const rodapeLogo = (ctx, parte) => par(EMPRESA.grupo ? logosDoGrupo(ctx, parte, 1.0) : EMPRESA.sem_logo ? "" : logoInline(ctx, parte, 1.3),
+  { jc: "center", antes: 0, depois: 0, linha: 240, estilo: "Rodape", borda: `<w:top w:val="single" w:sz="12" w:space="6" w:color="${EMPRESA.cor}"/>` });
+const codigoVersao = spec => `${spec.codigo}  ·  v${spec.versao}`;
+const paginaXdeY = (k = { sz: 8, cor: "404040" }) => run("Página ", k) + campo("PAGE", "1", k) + run(" de ", k) + campo("NUMPAGES", "1", k);
+
+function linhasControle(ctx, spec) {
+  const est = ESTADOS[spec.estado];
+  let texto = est.rodape;
+  if (spec.estado === "OFICIAL" && spec.aprovado_por) texto = `Aprovado por ${spec.aprovado_por} em ${spec.data_aprovacao || ""}. ` + texto;
+  const o = { jc: "center", antes: 0, depois: 0, linha: 240, estilo: "Rodape" };
+  const oficial = spec.estado === "OFICIAL";
+  return par(marca(ctx, spec) + run(codigoVersao(spec) + "  ·  ", { sz: 8, cor: "404040" }) + paginaXdeY({ sz: 8, cor: "000000", b: true }), { ...o, antes: 80 }) +
+    par(run(texto, { sz: 7.5, cor: oficial ? "404040" : est.cor, b: !oficial }), o) +
+    par(run(identificacaoEmpresa(), { sz: 7.5, cor: "7F7F7F" }), { ...o, borda: '<w:bottom w:val="single" w:sz="4" w:space="4" w:color="BFBFBF"/>' });
+}
+// Rodapé das páginas internas do documento longo: filete na cor da empresa, logo à esquerda e título (curto) à direita.
+function rodapeReduzido(ctx, parte, spec, larg) {
+  const logo = EMPRESA.grupo ? logosDoGrupo(ctx, parte, 0.6) : EMPRESA.sem_logo ? "" : logoInline(ctx, parte, 0.9);
+  const c1 = I(larg * (EMPRESA.grupo ? 0.6 : 0.35)), c2 = larg - c1;
+  const cel = (w, c) => `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${c}</w:tc>`;
+  return `<w:tbl><w:tblPr><w:tblW w:w="${larg}" w:type="dxa"/><w:tblBorders><w:top w:val="single" w:sz="12" w:space="0" w:color="${EMPRESA.cor}"/></w:tblBorders><w:tblLayout w:type="fixed"/>` +
+    `<w:tblCellMar><w:top w:w="100" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${grade([c1, c2])}</w:tblGrid><w:tr>` +
+    cel(c1, par(logo, { antes: 0, depois: 0, linha: 240, estilo: "Rodape" })) +
+    cel(c2, par(run(spec.titulo_curto || spec.titulo, { sz: 8, cor: "404040" }), { jc: "right", antes: 0, depois: 0, linha: 240, estilo: "Rodape" })) + "</w:tr></w:tbl>" +
+    par("", { antes: 0, depois: 0, linha: 120, estilo: "Rodape" });
+}
+
+/* ======================================================================= blocos de conteúdo */
+// Marcadores dos títulos: o sumário aponta para eles, e é isso que torna as linhas clicáveis no Word.
+function tituloNumerado(ctx, nivel, texto, numerar = true, quebra = false) {
+  let prefixo = "";
+  if (numerar) {
+    ctx.sec[nivel - 1]++;
+    for (let k = nivel; k < 5; k++) ctx.sec[k] = 0;
+    if (ctx.sec.slice(0, nivel - 1).some(n => n === 0)) ctx.avisos.push(`Título '${texto}' de nível ${nivel} sem seção superior.`);
+    prefixo = ctx.sec.slice(0, nivel).map(n => Math.max(1, n)).join(".") + " ";
+  }
+  const exib = nivel <= 2 ? texto.toUpperCase() : texto;
+  const marca = "_Toc9" + String(ctx.titulos.length + 1).padStart(8, "0");
+  ctx.titulos.push([nivel, prefixo + exib, marca]);
+  const bid = 9000 + ctx.titulos.length;
+  return par(`<w:bookmarkStart w:id="${bid}" w:name="${marca}"/>` + run(prefixo) + run(exib) + `<w:bookmarkEnd w:id="${bid}"/>`, { estilo: `Heading${nivel}`, quebra });
+}
+function tituloSemNumero(ctx, texto) {
+  const marca = "_Toc9" + String(ctx.titulos.length + 1).padStart(8, "0");
+  ctx.titulos.push([1, texto.toUpperCase(), marca]);
+  const bid = 9000 + ctx.titulos.length;
+  return par(`<w:bookmarkStart w:id="${bid}" w:name="${marca}"/>` + run(texto.toUpperCase()) + `<w:bookmarkEnd w:id="${bid}"/>`, { estilo: "TituloSemNumero", quebra: true });
+}
+function blocoLista(ctx, itens, abstrato, nivel = 0, nid = null) {
+  if (!nid) { nid = ctx.nums.length + 1; ctx.nums.push([nid, abstrato]); }
+  let out = "";
+  for (const it of itens) {
+    const txt = it && typeof it === "object" ? (it.texto || "") : it, sub = it && typeof it === "object" ? (it.sub || []) : [];
+    out += `<w:p><w:pPr><w:pStyle w:val="Lista"/><w:numPr><w:ilvl w:val="${nivel}"/><w:numId w:val="${nid}"/></w:numPr></w:pPr>${inline(txt)}</w:p>`;
+    if (sub.length) out += blocoLista(ctx, sub, abstrato, nivel + 1, nid);
+  }
+  return out;
+}
+function blocoTabela(ctx, b, larg, legenda = true) {
+  const tipo = b.tipo || "Tabela";
+  let out = "";
+  if (legenda) {
+    ctx.cont[tipo] = (ctx.cont[tipo] || 0) + 1;
+    out = par(run(`${tipo} ${ctx.cont[tipo]} – `, { b: true, sz: 10 }) + inline(b.titulo || "", { sz: 10 }), { estilo: "Legenda", keep: true });
+  }
+  const cab = b.cabecalho || [], linhas = b.linhas || [];
+  const ncol = cab.length ? cab.length : Math.max(...linhas.map(l => l.length));
+  const pesos = (b.larguras && b.larguras.length) ? b.larguras : Array(ncol).fill(1);
+  const soma = pesos.reduce((a, c) => a + c, 0);
+  const ws = pesos.map(p => I(larg * p / soma)); ws[ws.length - 1] = larg - ws.slice(0, -1).reduce((a, c) => a + c, 0);
+  const lin = s => `<w:${s} w:val="single" w:sz="8" w:space="0" w:color="000000"/>`;
+  const bordas = (tipo === "Quadro" ? ["top", "left", "bottom", "right", "insideH", "insideV"] : ["top", "bottom"]).map(lin).join("");
+  const alinh = b.alinhamento || Array(ncol).fill("left");
+  let tbl = `<w:tbl><w:tblPr><w:tblW w:w="${larg}" w:type="dxa"/><w:jc w:val="center"/><w:tblBorders>${bordas}</w:tblBorders><w:tblLayout w:type="fixed"/>` +
+    `<w:tblCellMar><w:top w:w="40" w:type="dxa"/><w:left w:w="80" w:type="dxa"/><w:bottom w:w="40" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr>` +
+    `<w:tblGrid>${grade(ws)}</w:tblGrid>`;
+  const linha = (vals, c) => {
+    let tr = `<w:tr><w:trPr><w:cantSplit/>${c ? "<w:tblHeader/>" : ""}</w:trPr>`;
+    for (let k = 0; k < ncol; k++) {
+      let tcpr = `<w:tcW w:w="${ws[k]}" w:type="dxa"/>`;
+      if (c) tcpr += '<w:tcBorders><w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/></w:tcBorders><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/>';
+      tr += `<w:tc><w:tcPr>${tcpr}<w:vAlign w:val="center"/></w:tcPr>${par(inline(k < vals.length ? vals[k] : "", { b: c }), { estilo: "TabelaTexto", jc: c ? "center" : (alinh[k] || "left") })}</w:tc>`;
+    }
+    return tr + "</w:tr>";
+  };
+  if (cab.length) tbl += linha(cab, true);
+  for (const l of linhas) tbl += linha(l, false);
+  out += tbl + "</w:tbl>";
+  if (!legenda) return out;
+  out += par(run("Fonte: ", { sz: 10 }) + inline("fonte" in b ? b.fonte : `Elaborado pela empresa (${new Date().getFullYear()}).`, { sz: 10 }), { estilo: "Fonte" });
+  if (b.nota) out += par(run("Nota: ", { sz: 10 }) + inline(b.nota, { sz: 10 }), { estilo: "Fonte" });
+  return out;
+}
+function blocoCampos(itens, larg, rotuloCm = 4.0) {
+  const c1 = I(rotuloCm * TW_CM), c2 = larg - c1;
+  let tbl = `<w:tbl><w:tblPr><w:tblW w:w="${larg}" w:type="dxa"/><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="A6A6A6"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="A6A6A6"/>` +
+    `<w:insideH w:val="single" w:sz="4" w:space="0" w:color="D9D9D9"/></w:tblBorders><w:tblLayout w:type="fixed"/>` +
+    `<w:tblCellMar><w:top w:w="30" w:type="dxa"/><w:left w:w="60" w:type="dxa"/><w:bottom w:w="30" w:type="dxa"/><w:right w:w="60" w:type="dxa"/></w:tblCellMar></w:tblPr>` +
+    `<w:tblGrid>${grade([c1, c2])}</w:tblGrid>`;
+  for (const [rot, val] of itens)
+    tbl += `<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="${c1}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr>${par(run(rot, { b: true, sz: 10 }), { estilo: "TabelaTexto" })}</w:tc>` +
+      `<w:tc><w:tcPr><w:tcW w:w="${c2}" w:type="dxa"/></w:tcPr>${par(inline(val, { sz: 10 }), { estilo: "TabelaTexto" })}</w:tc></w:tr>`;
+  return tbl + "</w:tbl>" + par("", { antes: 0, depois: 0, linha: 240, estilo: "TabelaTexto" });
+}
+function blocoAssinaturas(ass, larg) {
+  if (!ass || !ass.length) return "";
+  const porLinha = ass.length > 1 ? 2 : 1;
+  let out = par("", { antes: 0, depois: 0, keep: true });
+  for (let i = 0; i < ass.length; i += porLinha) {
+    const grupo = ass.slice(i, i + porLinha);
+    const total = porLinha > 1 ? larg : Math.min(larg, I(9 * TW_CM)), w = Math.floor(total / porLinha);
+    let tbl = `<w:tbl><w:tblPr><w:tblW w:w="${total}" w:type="dxa"/><w:jc w:val="center"/><w:tblLayout w:type="fixed"/>` +
+      `<w:tblCellMar><w:left w:w="200" w:type="dxa"/><w:right w:w="200" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${grade(grupo.map(() => w))}</w:tblGrid><w:tr><w:trPr><w:cantSplit/></w:trPr>`;
+    for (const a of grupo) {
+      let c = par("", { antes: 900, depois: 0, linha: 240, estilo: "TabelaTexto", keep: true });
+      c += par(run((a.nome || "").toUpperCase(), { b: true, sz: 10 }), { jc: "center", estilo: "TabelaTexto", keep: true, borda: '<w:top w:val="single" w:sz="6" w:space="4" w:color="000000"/>' });
+      for (const extra of [a.cargo, a.papel, a.documento]) if (extra) c += par(run(extra, { sz: 10 }), { jc: "center", estilo: "TabelaTexto", keep: true });
+      tbl += `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/></w:tcPr>${c}</w:tc>`;
+    }
+    out += tbl + "</w:tr></w:tbl>";
+  }
+  return out + par("", { antes: 0, depois: 0, linha: 240 });
+}
+// Assinaturas em tabela: usadas quando as linhas de assinatura ficariam sozinhas numa página.
+const CAB_ASSINATURAS = ["Nome", "Cargo", "Papel", "Assinatura", "Data"];
+function blocoAssinaturasTabela(ass, larg) {
+  if (!ass || !ass.length) return "";
+  const ws = [0.3, 0.18, 0.14, 0.26].map(x => I(larg * x));
+  ws.push(larg - ws.reduce((a, b) => a + b, 0));
+  const borda = "<w:tblBorders>" + ["top", "left", "bottom", "right", "insideH", "insideV"].map(l => `<w:${l} w:val="single" w:sz="4" w:space="0" w:color="000000"/>`).join("") + "</w:tblBorders>";
+  const cel = (w, c, cab) => `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${cab ? '<w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/>' : ""}<w:vAlign w:val="center"/></w:tcPr>${c}</w:tc>`;
+  let t = `<w:tbl><w:tblPr><w:tblW w:w="${larg}" w:type="dxa"/>${borda}<w:tblLayout w:type="fixed"/>` +
+    `<w:tblCellMar><w:left w:w="85" w:type="dxa"/><w:right w:w="85" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${grade(ws)}</w:tblGrid>` +
+    `<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>` + CAB_ASSINATURAS.map((c, i) => cel(ws[i], par(run(c, { b: true, sz: 10 }), { jc: "center", estilo: "TabelaTexto" }), true)).join("") + "</w:tr>";
+  for (const a of ass) {
+    const v = [String(a.nome || "").toUpperCase(), a.cargo || "", a.papel || a.documento || "", "", ""];
+    t += `<w:tr><w:trPr><w:cantSplit/><w:trHeight w:val="${I(1.1 * TW_CM)}" w:hRule="atLeast"/></w:trPr>` +
+      v.map((x, i) => cel(ws[i], par(run(x, { sz: 10, b: i === 0 }), { estilo: "TabelaTexto" }))).join("") + "</w:tr>";
+  }
+  return par(run("Assinaturas", { b: true }), { estilo: "SemRecuo", keep: true, antes: 240 }) + t + "</w:tbl>" + par("", { antes: 0, depois: 0, linha: 240 });
+}
+const ehTabelaAssinaturas = b => b.t === "tabela" && Array.isArray(b.cabecalho) && b.cabecalho.map(c => String(c).replace(/\*/g, "").trim()).join("|") === CAB_ASSINATURAS.join("|");
+const fimDeAssinatura = b => b.t === "local_data" || (b.t === "p" && /^\**Assinaturas\**$/.test(b.texto || ""));
+// Tira do corpo as assinaturas (em linhas ou em tabela) e o local e data que as antecede: quem decide se o
+// documento leva assinatura é a caixa "Com assinatura", não o texto.
+function extrairAssinaturas(lista, ficha) {
+  let envolvidos = [];
+  const fora = [];
+  for (const b of lista) {
+    if (b.t === "assinaturas") envolvidos.push(...b.itens.map(a => ({ nome: a.nome || "", cargo: a.cargo || "", papel: a.papel || a.documento || "" })));
+    else if (ehTabelaAssinaturas(b)) envolvidos.push(...(b.linhas || []).map(l => ({ nome: l[0] || "", cargo: l[1] || "", papel: l[2] || "" })));
+    else fora.push(b);
+  }
+  const tinha = envolvidos.length > 0;
+  if (tinha) while (fora.length && fimDeAssinatura(fora[fora.length - 1])) fora.pop();
+  if (ficha && Array.isArray(ficha.envolvidos) && ficha.envolvidos.length) envolvidos = ficha.envolvidos.map(a => ({ ...a }));
+  return { blocos: fora, envolvidos, com: !!(ficha && ficha.com_assinatura) || tinha };
+}
+// Documento "com assinatura": o corpo termina com local e data e as assinaturas dos envolvidos (montar_assinaturas do gerador).
+function montarAssinaturas(lista, spec, formato) {
+  if (!spec.com_assinatura || !(spec.envolvidos || []).length) return lista;
+  const base = lista.filter(b => !(b.t === "assinaturas" || ehTabelaAssinaturas(b)));
+  while (base.length && fimDeAssinatura(base[base.length - 1])) base.pop();
+  formato = formato || (spec.assinatura_formato === "tabela" ? "tabela" : "linhas");
+  base.push({ t: "local_data", data: spec.data_emissao });
+  base.push({ t: "assinaturas", itens: spec.envolvidos, formato });
+  return base;
+}
+/* Estimativa da paginação (A4, Arial, mesmas medidas dos estilos): diz se as linhas de assinatura, que andam juntas
+   com o local e data, ficariam sozinhas numa página. O gerador decide isso renderizando com o LibreOffice, que o
+   navegador não tem; aqui é estimativa, e o campo Formato permite escolher à mão. */
+let _tela = null;
+function largPt(t, pt, negrito) { _tela = _tela || document.createElement("canvas").getContext("2d"); _tela.font = `${negrito ? "bold " : ""}${pt}pt Arial`; return _tela.measureText(t).width * 0.75; }   // px → pt
+function linhasDe(texto, larg, pt, recuo, negrito) {
+  const palavras = String(texto || "").replace(/\*\*|__|\*/g, "").split(/\s+/).filter(Boolean);
+  if (!palavras.length) return 1;
+  const esp = largPt(" ", pt, negrito);
+  let n = 1, atual = 0, lim = larg - (recuo || 0);
+  for (const w0 of palavras) {
+    const w = largPt(w0, pt, negrito);
+    if (atual > 0 && atual + esp + w > lim) { n++; atual = w; lim = larg; } else atual += (atual > 0 ? esp : 0) + w;
+  }
+  return n;
+}
+// Medidas de cada bloco em pontos: espaço antes (a), conteúdo (c) e espaço depois (d). Entre dois blocos vale o
+// maior dos dois espaços, como no Word; no alto da página o espaço antes não conta.
+function medidas(b, L) {
+  const LN = 20.7, L10 = 11.5, txt = x => typeof x === "string" ? x : (x && x.texto) || "";
+  if (/^h[1-5]$/.test(b.t)) return { a: 18, c: linhasDe(b.texto, L, 12, 0, true) * LN, d: 12, ln: LN };
+  switch (b.t) {
+    case "p": return { a: 0, c: linhasDe(b.texto, L, 12, b.sem_recuo ? 0 : 35.4) * LN, d: 6, ln: LN, quebra: true };
+    case "alineas": case "numerada": case "marcadores": case "checklist": {
+      let c = 0;
+      for (const x of b.itens || []) {
+        c += linhasDe(txt(x), L - 36, 12) * LN + 3;
+        for (const y of (x && x.sub) || []) c += linhasDe(txt(y), L - 72, 12) * LN + 3;
+      }
+      return { a: 0, c: Math.max(0, c - 3), d: 3 };
+    }
+    case "tabela": {
+      const linhas = (b.cabecalho ? [b.cabecalho] : []).concat(b.linhas || []);
+      const n = Math.max(1, ...linhas.map(l => l.length));
+      const tot = (b.larguras || []).reduce((a, x) => a + x, 0);
+      const cw = i => (b.larguras && tot ? L * b.larguras[i] / tot : L / n) - 10;
+      const corpo = linhas.reduce((s, l) => s + Math.max(...l.map((c, i) => linhasDe(c, cw(i), 10))) * L10 + 5, 0);
+      return { a: 12, c: 14.5 + corpo + 14.5, d: 12 };   // toda tabela do corpo leva legenda e fonte
+    }
+    case "campos": {
+      const rot = (b.rotulo_cm || 4.0) * 28.35 - 6;
+      return { a: 0, c: (b.itens || []).reduce((s, [r, v]) => s + Math.max(linhasDe(r, rot, 10, 0, true), linhasDe(v, L - rot - 7, 10)) * 13 + 4, 0), d: 6 };
+    }
+    case "nota": return { a: 3, c: linhasDe(`${b.rotulo || "Nota"}: ${b.texto}`, L, 10) * L10, d: 6 };
+    case "destaque": return { a: 0, c: linhasDe(`${b.rotulo || "Importante"}: ${b.texto}`, L - 20, 12) * LN, d: 6 };
+    case "citacao": return { a: 12, c: linhasDe(b.texto, L - 113, 10) * L10, d: 18 };
+    case "local_data": return { a: 12, c: LN, d: 6 };
+    case "codigo": return { a: 0, c: String(b.texto).split("\n").length * 12, d: 0 };
+    case "assinaturas": {
+      const extras = Math.max(0, ...b.itens.map(a => [a.cargo, a.papel, a.documento].filter(Boolean).length));
+      return { a: 0, c: LN + Math.ceil(b.itens.length / 2) * (45 + 11.5 + 15.5 + extras * L10 + 4) + 13.8, d: 0 };
+    }
+    default: return { a: 0, c: 0, d: 0 };
+  }
+}
+function assinaturasSozinhas(spec, lista) {
+  const longo = spec.variante === "longo", alt = longo ? 674 : 657, L = 453.5;
+  const i = lista.findIndex(b => b.t === "assinaturas");
+  if (i < 0) return false;
+  let ini = i; if (ini > 0 && lista[ini - 1].t === "local_data") ini--;
+  // documento curto: título e linha de controle (e o quadro de identificação) no alto da primeira página
+  let y = 0, d = 0;
+  if (!longo) {
+    y = linhasDe(`${(TIPOS_CURTOS[spec.tipo] || "")} – ${spec.titulo || ""}`.toUpperCase(), L, 13, 0, true) * 17.2 + 3 + 10.5; d = 12;
+    if (spec.identificacao && spec.identificacao.length) { const m = medidas({ t: "campos", itens: spec.identificacao, rotulo_cm: 3.3 }, L); y += Math.max(d, m.a) + m.c; d = m.d; }
+  }
+  let primeiroH1 = true;
+  const corpoAntes = lista.slice(0, ini);
+  corpoAntes.forEach((b, k) => {
+    if (b.t === "quebra" || (longo && b.t === "h1" && !primeiroH1 && b.nova_pagina !== false)) { y = 0; d = 0; }
+    if (b.t === "h1") primeiroH1 = false;
+    const m = medidas(b, L);
+    let ini0 = y === 0 ? 0 : y + Math.max(d, m.a);
+    // título anda junto com o começo do bloco seguinte (duas linhas, ou o bloco inteiro se for menor)
+    let precisa = m.c;
+    if (/^h[1-5]$/.test(b.t) && corpoAntes[k + 1]) { const n = medidas(corpoAntes[k + 1], L); precisa += Math.max(m.d, n.a) + Math.min(n.c, n.ln ? 2 * n.ln : n.c); }
+    if (ini0 + precisa > alt && /^h[1-5]$/.test(b.t) && ini0 > 0) { y = m.c; d = m.d; return; }
+    if (ini0 + m.c > alt) {
+      if (m.quebra) {
+        // linhas viúvas e órfãs: o parágrafo só se divide deixando ao menos 2 linhas de cada lado
+        const n = Math.round(m.c / m.ln), cabe = Math.floor((alt - ini0) / m.ln);
+        y = (cabe < 2 || n - cabe < 2) ? m.c : (n - cabe) * m.ln;
+      } else if (/^h[1-5]$/.test(b.t) || m.c <= alt) {
+        y = m.c;   // título e bloco que não se divide vão inteiros para a página seguinte
+        if (!/^h[1-5]$/.test(b.t) && ["tabela", "alineas", "numerada", "marcadores", "checklist"].includes(b.t)) {
+          // tabela partida repete o cabeçalho na página seguinte
+          const rep = b.t === "tabela" && b.cabecalho ? Math.max(...b.cabecalho.map(c => linhasDe(c, L / b.cabecalho.length - 10, 10))) * 11.5 + 5 : 0;
+          let h = m.c - (alt - ini0) + rep; while (h > alt) h -= alt - rep; y = h;
+        }
+      } else { let h = m.c - (alt - ini0); while (h > alt) h -= alt; y = h; }
+    } else y = ini0 + m.c;
+    d = m.d;
+  });
+  const ms = lista.slice(ini, i + 1).map(b => medidas(b, L));
+  const hAss = ms.reduce((s, m, k) => s + (k ? Math.max(ms[k - 1].d, m.a) : 0) + m.c, 0);
+  const inicio = y === 0 ? 0 : y + Math.max(d, ms[0].a);
+  return y > 0 && inicio + hAss > alt && hAss <= alt;
+}
+const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+function dataExtenso(d) {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(d || "");
+  return m && +m[2] >= 1 && +m[2] <= 12 ? `${+m[1]} de ${MESES[+m[2] - 1]} de ${+m[3]}` : d;
+}
+const hojeBR = () => { const d = new Date(); return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`; };
+function blocos(ctx, lista, parte, larg, longo) {
+  let out = "", primeiroH1 = true;
+  const abstratos = { alineas: 1, numerada: 2, marcadores: 3, checklist: 4 };
+  for (const b of lista) {
+    const t = b.t, m = /^h([1-5])$/.exec(t || "");
+    if (m) {
+      const nivel = +m[1];
+      const quebra = longo && nivel === 1 && !primeiroH1 && b.nova_pagina !== false;
+      if (nivel === 1) primeiroH1 = false;
+      out += tituloNumerado(ctx, nivel, b.texto, b.numerar !== false, quebra);
+    }
+    else if (t === "p") out += par(inline(b.texto), { estilo: b.sem_recuo ? "SemRecuo" : "Normal", jc: b.alinhar });
+    else if (abstratos[t]) out += blocoLista(ctx, b.itens, abstratos[t]);
+    else if (t === "citacao") out += par(inline(b.texto + (b.fonte ? ` ${b.fonte}` : ""), { sz: 10 }), { estilo: "CitacaoLonga" });
+    else if (t === "nota") out += par(run(`${b.rotulo || "Nota"}: `, { b: true, sz: 10 }) + inline(b.texto, { sz: 10 }), { estilo: "Nota" });
+    else if (t === "destaque") {
+      const cor = { atencao: "C99700", info: "1F5FA8", erro: "B00020" }[b.nivel || "info"] || "1F5FA8";
+      out += par(run(`${b.rotulo || "Importante"}: `, { b: true }) + inline(b.texto), { estilo: "SemRecuo", borda: `<w:left w:val="single" w:sz="24" w:space="8" w:color="${cor}"/>`, ind: 'w:left="227" w:firstLine="0"' });
+    }
+    else if (t === "tabela") out += blocoTabela(ctx, b, larg);
+    else if (t === "campos") out += blocoCampos(b.itens, larg, b.rotulo_cm || 4.0);
+    else if (t === "assinaturas") out += b.formato === "tabela" ? blocoAssinaturasTabela(b.itens, larg) : blocoAssinaturas(b.itens, larg);
+    else if (t === "local_data") out += par(run(`${"local" in b ? b.local : dado("cidade")}, ${dataExtenso(b.data || hojeBR())}.`), { estilo: "SemRecuo", jc: "right", antes: 240, keep: true });
+    else if (t === "quebra") out += par('<w:r><w:br w:type="page"/></w:r>', { antes: 0, depois: 0 });
+    else if (t === "codigo") for (const l of String(b.texto).split("\n")) out += par(run(l, { fonte: "Courier New", sz: 9.5 }), { estilo: "TabelaTexto", ind: 'w:left="284"', antes: 0, depois: 0 });
+    // figura: o gerador lê a imagem de um caminho em disco, que a página não tem
+    else ctx.avisos.push(t === "figura" ? `Figura "${b.titulo || ""}" não incluída: a página não lê imagens do corpo; use o gerador.` : `Bloco desconhecido ignorado: ${t}`);
+  }
+  return out;
+}
+
+/* ======================================================================= estilos, numeração, configurações */
+function estilosXml() {
+  const est = (id, nome, ppr = "", r = "", prox) =>
+    `<w:style w:type="paragraph" w:styleId="${id}"><w:name w:val="${nome}"/><w:basedOn w:val="Normal"/>${prox ? `<w:next w:val="${prox}"/>` : ""}<w:qFormat/><w:pPr>${ppr}</w:pPr><w:rPr>${r}</w:rPr></w:style>`;
+  let s = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${NS}>` +
+    '<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Arial" w:cs="Arial"/><w:sz w:val="24"/><w:szCs w:val="24"/><w:lang w:val="pt-BR" w:eastAsia="pt-BR" w:bidi="ar-SA"/></w:rPr></w:rPrDefault>' +
+    '<w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="360" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' +
+    '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/><w:pPr><w:widowControl/><w:spacing w:after="120" w:line="360" w:lineRule="auto"/><w:ind w:firstLine="709"/><w:jc w:val="both"/></w:pPr>' +
+    '<w:rPr><w:color w:val="000000"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:style>';
+  s += est("SemRecuo", "Texto sem recuo", '<w:ind w:firstLine="0"/>');
+  const tit = '<w:keepNext/><w:keepLines/><w:spacing w:before="360" w:after="240" w:line="360" w:lineRule="auto"/><w:ind w:left="0" w:firstLine="0"/><w:jc w:val="left"/>';
+  ["<w:b/><w:bCs/><w:caps/>", "<w:caps/>", "<w:b/><w:bCs/>", "<w:b/><w:i/>", "<w:i/>"].forEach((r, n) =>
+    s += est(`Heading${n + 1}`, `heading ${n + 1}`, tit + `<w:outlineLvl w:val="${n}"/>`, r, "Normal"));
+  const centro = '<w:keepNext/><w:spacing w:before="0" w:after="360" w:line="360" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/>';
+  s += est("TituloSemNumero", "Título sem indicativo numérico", centro + '<w:outlineLvl w:val="0"/>', "<w:b/><w:bCs/><w:caps/>", "Normal");
+  s += est("TituloSumario", "Título do sumário", centro, "<w:b/><w:bCs/><w:caps/>", "Normal");
+  s += est("TituloDocumento", "Título do documento", '<w:keepNext/><w:spacing w:before="0" w:after="60" w:line="276" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/>', '<w:b/><w:bCs/><w:caps/><w:sz w:val="26"/><w:szCs w:val="26"/>');
+  const peq = '<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/>';
+  s += est("Legenda", "caption", '<w:keepNext/><w:spacing w:before="240" w:after="60" w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/>', '<w:sz w:val="20"/><w:szCs w:val="20"/>');
+  s += est("Fonte", "Fonte de ilustração", '<w:spacing w:before="60" w:after="240" w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="left"/>', '<w:sz w:val="20"/><w:szCs w:val="20"/>');
+  s += est("TabelaTexto", "Texto de tabela", peq + '<w:jc w:val="left"/>', '<w:sz w:val="20"/><w:szCs w:val="20"/>');
+  s += est("CitacaoLonga", "Citação longa", '<w:spacing w:before="240" w:after="360" w:line="240" w:lineRule="auto"/><w:ind w:left="2268" w:firstLine="0"/><w:jc w:val="both"/>', '<w:sz w:val="20"/><w:szCs w:val="20"/>');
+  s += est("Nota", "Nota", '<w:spacing w:before="60" w:after="120" w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="both"/>', '<w:sz w:val="20"/><w:szCs w:val="20"/>');
+  s += est("Referencia", "Referência", '<w:spacing w:before="0" w:after="240" w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="left"/>');
+  s += est("Lista", "List Paragraph", '<w:spacing w:before="0" w:after="60" w:line="360" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="both"/>');
+  s += est("Rodape", "footer", peq, '<w:sz w:val="16"/><w:szCs w:val="16"/>');
+  ["<w:b/><w:caps/>", "<w:caps/>", ""].forEach((r, n) =>
+    s += est(`TOC${n + 1}`, `toc ${n + 1}`, '<w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9061"/></w:tabs><w:spacing w:before="0" w:after="60" w:line="276" w:lineRule="auto"/><w:ind w:left="0" w:firstLine="0"/><w:jc w:val="left"/>', r, "Normal"));
+  s += '<w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/><w:tblPr><w:tblInd w:w="0" w:type="dxa"/><w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="108" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style>';
+  return s + "</w:styles>";
+}
+function numeracaoXml(ctx) {
+  const nv = (ilvl, fmt, txt, esq, pend, fonte) => `<w:lvl w:ilvl="${ilvl}"><w:start w:val="1"/><w:numFmt w:val="${fmt}"/><w:lvlText w:val="${txt}"/><w:lvlJc w:val="left"/>` +
+    `<w:pPr><w:ind w:left="${esq}" w:hanging="${pend}"/></w:pPr>${fonte ? `<w:rPr><w:rFonts w:ascii="${fonte}" w:hAnsi="${fonte}" w:hint="default"/></w:rPr>` : ""}</w:lvl>`;
+  const a = [
+    [1, nv(0, "lowerLetter", "%1)", 1134, 425) + nv(1, "bullet", "–", 1560, 426) + nv(2, "bullet", "–", 1985, 425)],
+    [2, nv(0, "decimal", "%1.", 1134, 425) + nv(1, "lowerLetter", "%2)", 1560, 426) + nv(2, "bullet", "–", 1985, 425)],
+    [3, nv(0, "bullet", "•", 1134, 425, "Arial") + nv(1, "bullet", "–", 1560, 426) + nv(2, "bullet", "–", 1985, 425)],
+    [4, nv(0, "bullet", "☐", 1134, 425, "Segoe UI Symbol") + nv(1, "bullet", "☐", 1560, 426, "Segoe UI Symbol") + nv(2, "bullet", "–", 1985, 425)]];
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering ${NS}>` +
+    a.map(([id, lv]) => `<w:abstractNum w:abstractNumId="${id}"><w:multiLevelType w:val="multilevel"/>${lv}</w:abstractNum>`).join("") +
+    ctx.nums.map(([nid, aid]) => `<w:num w:numId="${nid}"><w:abstractNumId w:val="${aid}"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>`).join("") +
+    "</w:numbering>";
+}
+const settingsXml = atualizar => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings ${NS}>` +
+  '<w:defaultTabStop w:val="709"/><w:hyphenationZone w:val="425"/><w:characterSpacingControl w:val="doNotCompress"/>' + (atualizar ? '<w:updateFields w:val="true"/>' : "") +
+  '<w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat>' +
+  '<w:themeFontLang w:val="pt-BR"/><w:decimalSymbol w:val=","/><w:listSeparator w:val=";"/></w:settings>';
+
+/* ======================================================================= validação (mesmas regras do gerador)
+   O gerador recusa e sai; aqui a recusa vira erro de campo, para a página marcar o que falta. */
+function validar(spec) {
+  const erros = [], avisos = [];
+  const emp = String(spec.empresa || ORG.padrao).toUpperCase();
+  if (!(emp in EMPRESAS)) return { erros: [{ campo: "empresa", msg: `Empresa ${emp} não está no marca.json carregado.` }], avisos };
+  definirEmpresa(emp); spec.empresa = EMP_ID;
+  spec.estado = String(spec.estado || "MINUTA").toUpperCase().replace(/ /g, "_").replace(/Ã/g, "A");
+  if (!ESTADOS[spec.estado]) return { erros: [{ campo: "estado", msg: `Estado inválido: ${spec.estado}.` }], avisos };
+  if (!ESTADOS_ATIVOS.includes(spec.estado)) avisos.push(`Estado ${ESTADOS[spec.estado].rotulo.toLowerCase()} foi aposentado: use minuta para o texto que ainda não é oficial.`);
+  const tipo = String(spec.tipo || "").toUpperCase();
+  // Empresa, tipo e área fora da lista de ativos do marca.json: valem para ler e versionar documento antigo.
+  if (!EMPRESA.ativa) avisos.push(`Empresa ${EMP_ID} está aposentada no marca.json: use-a só para versionar documento antigo.`);
+  if (tipo && ORG.tipos_ativos.length && !ORG.tipos_ativos.includes(tipo)) avisos.push(`Tipo ${tipo} não está entre os ativos do marca.json: sigla aposentada ou fora do padrão.`);
+  if (spec.area && ORG.areas_ativas.length && !ORG.areas_ativas.includes(String(spec.area).toUpperCase())) avisos.push(`Área ${String(spec.area).toUpperCase()} não está entre as ativas do marca.json.`);
+  if (spec.estado !== "OBSOLETO" && spec.titulo) {
+    const novo = tituloSemTipo(spec.titulo, tipo);
+    if (novo !== spec.titulo) { avisos.push(`Título sem o nome do tipo, que já sai impresso acima dele: "${spec.titulo}" passou a "${novo}".`); spec.titulo = novo; }
+  }
+  if (!("variante" in spec)) spec.variante = TIPOS_LONGOS[tipo] ? "longo" : "curto";
+  if (!spec.codigo) {
+    const area = String(spec.area || "ADM").toUpperCase(), num = spec.numero;
+    const n = num ? String(parseInt(num, 10)).padStart(3, "0") : "XXX";
+    if (TIPOS_CURTOS[tipo] && !spec.ano) spec.ano = /^\d{2}\/\d{2}\/\d{4}$/.test(String(spec.data_emissao || "")) ? +spec.data_emissao.slice(-4) : new Date().getFullYear();
+    spec.codigo = `${EMP_ID}-${tipo || "DOC"}-${area}-${n}` + (TIPOS_CURTOS[tipo] ? `/${spec.ano}` : "");
+  }
+  const oficialOuObs = spec.estado === "OFICIAL" || spec.estado === "OBSOLETO";
+  const faltam = EMPRESA.grupo ? [] : [!EMPRESA.razao && "a razão social", !EMPRESA.documento && `o ${EMPRESA.documento_rotulo}`].filter(Boolean);
+  if (faltam.length) {
+    const nomes = faltam.join(" e ");
+    if (oficialOuObs) erros.push({ campo: "empresa", msg: `Cadastre ${nomes} de ${EMPRESA.marca} no marca.json antes de emitir documento oficial: até lá, só minuta ou documento em aprovação.` });
+    else avisos.push(`${EMPRESA.marca}: ${nomes} ainda não está no cadastro; o cabeçalho mostra [definir].`);
+  }
+  // Minuta e em aprovação saem com XXX: o número é reservado na publicação, não é pendência.
+  if (spec.codigo.includes("XXX") && oficialOuObs)
+    erros.push({ campo: "numero", msg: "Documento oficial precisa de número. Conecte a pasta para reservar o próximo livre, ou informe o número em Mais opções." });
+  let v = String(spec.versao || "1.0").trim();
+  if (oficialOuObs) {
+    if (v.includes("-r")) { v = v.split("-r")[0]; avisos.push(`Versão ajustada para ${v}: documento ${spec.estado.toLowerCase()} não leva sufixo de rodada.`); }
+    if (spec.estado === "OFICIAL") {
+      if (!spec.aprovado_por) erros.push({ campo: "aprovado_por", msg: "Informe quem aprovou." });
+      if (!spec.data_aprovacao) erros.push({ campo: "data_aprovacao", msg: "Informe a data da aprovação." });
+      spec.vigencia = spec.vigencia || spec.data_aprovacao;
+      if (spec.historico && spec.historico.length && spec.aprovado_por && !spec.historico.some(h => String(h.versao) === v))
+        spec.historico.push({ versao: v, data: spec.data_aprovacao, descricao: `Aprovada por ${spec.aprovado_por}.`, responsavel: spec.aprovado_por });
+    }
+    if (spec.estado === "OBSOLETO" && !(spec.substituido_por || spec.motivo_obsoleto))
+      erros.push({ campo: "substituido_por", msg: "Obsoleto exige o código do documento que o substitui ou o motivo da obsolescência." });
+  } else if (!v.includes("-r")) {
+    v += "-r1"; avisos.push(`Versão ajustada para ${v} (documento não oficial leva sufixo de rodada).`);
+  }
+  spec.versao = v;
+  spec.data_emissao = spec.data_emissao || hojeBR();
+  spec.classificacao = spec.classificacao || "Interno";
+  spec.local = spec.local || dado("cidade");
+  if (!spec.titulo) erros.push({ campo: "titulo", msg: "Informe o título do documento." });
+  return { erros, avisos };
+}
+
+/* ======================================================================= atualização de documento já timbrado (mesmas regras do gerador) */
+function sugerirAtualizacao(anterior, mudanca) {
+  const vAnt = String(anterior.versao || "1.0"), base = vAnt.split("-r")[0];
+  const [x, y] = (base.split(".").concat(["0"])).slice(0, 2).map(t => parseInt(t, 10) || 0);
+  if (anterior.estado === "OFICIAL") {
+    const alvo = mudanca === "correcao" ? `${x}.${y + 1}` : `${x + 1}.0`;
+    return { versao: `${alvo}-r1`, estado: "MINUTA" };
+  }
+  const rod = vAnt.includes("-r") ? parseInt(vAnt.split("-r")[1], 10) + 1 : 1;
+  // Estado aposentado (rascunho, em revisão): a rodada seguinte já sai com o nome atual.
+  const est = ESTADO_SUCESSOR[anterior.estado] || anterior.estado || "MINUTA";
+  return { versao: `${base}-r${rod}`, estado: est };
+}
+function historicoAtualizado(anterior, versaoNova, oQueMudou, responsavel, data) {
+  const hist = JSON.parse(JSON.stringify(anterior.historico || []));
+  if (!hist.length) hist.push({ versao: String(anterior.versao || ""), data: anterior.data_aprovacao || anterior.data_emissao || "", descricao: "Emissão inicial.", responsavel: anterior.elaborado_por || "" });
+  hist.push({ versao: versaoNova, data, descricao: oQueMudou, responsavel: responsavel || anterior.elaborado_por || "" });
+  return hist;
+}
+function obsoletoDaAnterior(anterior, nova) {
+  const velha = JSON.parse(JSON.stringify(anterior));
+  delete velha.codigo;
+  velha.estado = "OBSOLETO";
+  velha.substituido_por = `${nova.codigo} v${nova.versao}`;
+  return velha;
+}
+
+/* ======================================================================= montagem do .docx */
+function secao(hRid, fRid, marg, hCm, fCm, novaPagina) {
+  const [t, r, b, l] = marg.map(m => I(m * TW_CM));
+  return `<w:sectPr><w:headerReference w:type="default" r:id="${hRid}"/><w:footerReference w:type="default" r:id="${fRid}"/>${novaPagina ? '<w:type w:val="nextPage"/>' : ""}` +
+    `<w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="${t}" w:right="${r}" w:bottom="${b}" w:left="${l}" w:header="${I(hCm * TW_CM)}" w:footer="${I(fCm * TW_CM)}" w:gutter="0"/>` +
+    `${BORDA_PAGINA}<w:cols w:space="708"/></w:sectPr>`;
+}
+function montar(spec, conteudo) {
+  const ctx = new Ctx(), D = "word/document.xml", est = ESTADOS[spec.estado], longo = spec.variante === "longo";
+  const largT = I((21 - MARG_TIMBRADO[1] - MARG_TIMBRADO[3]) * TW_CM), largA = I((21 - MARG_ABNT[1] - MARG_ABNT[3]) * TW_CM);
+  const tipoNome = spec.tipo_nome || TIPOS_CURTOS[spec.tipo] || TIPOS_LONGOS[spec.tipo] || "Documento";
+  const partes = {};
+  partes["word/header1.xml"] = ["hdr", cabecalhoControle(ctx, spec, MARG_TIMBRADO[3])];
+  partes["word/footer1.xml"] = ["ftr", rodapeLogo(ctx, "word/footer1.xml")];
+  const rh1 = ctx.rel(D, "header", "header1.xml"), rf1 = ctx.rel(D, "footer", "footer1.xml");
+  let corpo = "", temSumario = false;
+
+  if (!longo) {
+    corpo += par(run(tipoNome.toUpperCase() + (spec.titulo ? ` – ${spec.titulo}` : ""), { b: true }), { estilo: "TituloDocumento" });
+    corpo += par(run(`${spec.codigo}  ·  Versão ${spec.versao}  ·  Emissão ${spec.data_emissao}  ·  `, { sz: 9, cor: "404040" }) +
+      run(est.rotulo.toUpperCase(), { sz: 9, b: true, cor: est.cor }), { jc: "center", antes: 0, depois: 240, linha: 240, estilo: "SemRecuo" });
+    // empresa e documento já estão no cabeçalho
+    if (spec.identificacao && spec.identificacao.length) corpo += blocoCampos(spec.identificacao, largT, 3.3);
+    corpo += blocos(ctx, conteudo, D, largT, false);
+    corpo += secao(rh1, rf1, MARG_TIMBRADO, 1.2, 1.2, false);
+  } else {
+    // ---------------- capa (timbrado completo)
+    const altura = 29.7 - MARG_TIMBRADO[0] - MARG_TIMBRADO[2];
+    const cp = (x, o = {}) => par(x, { jc: "center", antes: o.antes || 0, depois: o.depois || 0, linha: o.linha || 276, estilo: "SemRecuo" });
+    const linhaCapa = (h, c, va) => `<w:tr><w:trPr><w:trHeight w:val="${I(h * TW_CM)}" w:hRule="exact"/></w:trPr><w:tc><w:tcPr><w:tcW w:w="${largT}" w:type="dxa"/><w:vAlign w:val="${va}"/></w:tcPr>${c}</w:tc></w:tr>`;
+    const meio = cp(run(tipoNome.toUpperCase(), { sz: 12, cor: EMPRESA.cor, b: true, esp: 40 }), { depois: 240 }) +
+      cp(run(spec.titulo.toUpperCase(), { b: true, sz: 22 }), { linha: 300, depois: 200 }) +
+      (spec.subtitulo ? cp(run(spec.subtitulo, { sz: 14, cor: "262626" }), { depois: 480 }) : cp("", { depois: 480 }));
+    const ctab = [["Código", spec.codigo], ["Versão", spec.versao], ["Estado", est.rotulo.toUpperCase()], ["Classificação", spec.classificacao]];
+    const wqs = [1.6, 1, 1, 1].map(p => I(largT * p / 4.6));
+    let quadro = `<w:tbl><w:tblPr><w:tblW w:w="${wqs.reduce((a, c) => a + c, 0)}" w:type="dxa"/><w:jc w:val="center"/><w:tblBorders><w:top w:val="single" w:sz="6" w:space="0" w:color="000000"/>` +
+      `<w:bottom w:val="single" w:sz="6" w:space="0" w:color="000000"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/></w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr><w:tblGrid>${grade(wqs)}</w:tblGrid><w:tr>`;
+    ctab.forEach(([rot, val], k) => quadro += `<w:tc><w:tcPr><w:tcW w:w="${wqs[k]}" w:type="dxa"/></w:tcPr>` +
+      par(run(rot.toUpperCase(), { sz: 7, cor: "595959", esp: 10 }), { jc: "center", estilo: "TabelaTexto", antes: 60 }) +
+      par(run(val, { b: true, sz: 9.5, cor: rot === "Estado" ? est.cor : "000000" }), { jc: "center", estilo: "TabelaTexto", depois: 60 }) + "</w:tc>");
+    quadro += "</w:tr></w:tbl>";
+    const base = cp(run(spec.local, { b: true })) + cp(run(spec.data_emissao.slice(-4), { b: true }));
+    corpo += `<w:tbl><w:tblPr><w:tblW w:w="${largT}" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblCellMar><w:left w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr>` +
+      `<w:tblGrid>${grade([largT])}</w:tblGrid>${linhaCapa(1.0, cp(""), "top")}${linhaCapa(altura - 4.2, meio + quadro + cp("", { linha: 240 }), "center")}${linhaCapa(2.8, base, "bottom")}</w:tbl>`;
+    corpo += par("", { antes: 0, depois: 0, linha: 240, sect: secao(rh1, rf1, MARG_TIMBRADO, 1.2, 1.2, true) });
+
+    // ---------------- seção ABNT (cabeçalho reduzido)
+    partes["word/header2.xml"] = ["hdr", cabecalhoControle(ctx, spec, MARG_ABNT[3])];
+    partes["word/footer2.xml"] = ["ftr", rodapeReduzido(ctx, "word/footer2.xml", spec, largA)];
+    const rh2 = ctx.rel(D, "header", "header2.xml"), rf2 = ctx.rel(D, "footer", "footer2.xml");
+
+    corpo += par(run("FOLHA DE CONTROLE"), { estilo: "TituloSumario" });
+    corpo += blocoCampos([["Título", spec.titulo + (spec.subtitulo ? ` – ${spec.subtitulo}` : "")], ["Tipo", tipoNome], ["Código", spec.codigo], ["Versão", spec.versao],
+      ["Estado", `**${est.rotulo.toUpperCase()}**`], ["Classificação", spec.classificacao],
+      ["Área responsável", spec.area_nome || AREAS[String(spec.area || "").toUpperCase()] || spec.area || ""],
+      ["Elaborado por", spec.elaborado_por || ""], ["Revisado por", spec.revisado_por || ""], ["Aprovado por", spec.aprovado_por || "Pendente – documento não aprovado"],
+      ["Data de emissão", spec.data_emissao], ["Vigência", spec.estado === "OBSOLETO" ? "Encerrada" : (spec.vigencia || "A partir da aprovação")]]
+      .concat(spec.substitui ? [["Substitui", spec.substitui]] : [])
+      .concat(spec.substituido_por ? [["Substituído por", spec.substituido_por]] : [])
+      .concat(spec.motivo_obsoleto ? [["Motivo da obsolescência", spec.motivo_obsoleto]] : []), largA, 4.5);
+    const hist = (spec.historico && spec.historico.length) ? spec.historico : [{ versao: spec.versao, data: spec.data_emissao, descricao: "Emissão inicial.", responsavel: spec.elaborado_por || "" }];
+    corpo += par(run("Histórico de revisões", { b: true }), { estilo: "SemRecuo", antes: 240, depois: 120, keep: true });
+    corpo += blocoTabela(ctx, { tipo: "Quadro", cabecalho: ["Versão", "Data", "O que mudou", "Responsável"], larguras: [1.4, 1.6, 5, 2.4],
+      linhas: hist.map(h => [h.versao || "", h.data || "", h.descricao || "", h.responsavel || ""]) }, largA, false);
+    if (spec.estado === "OFICIAL") {
+      corpo += par(run("Aprovação", { b: true }), { estilo: "SemRecuo", antes: 240, depois: 0, keep: true });
+      corpo += blocoAssinaturas(spec.assinaturas_aprovacao || [{ nome: spec.aprovado_por, cargo: spec.cargo_aprovador || "Aprovador", documento: `Aprovado em ${spec.data_aprovacao}` }], largA);
+    }
+
+    // sumário: só os títulos, sem números de página (o gerador os acha renderizando com o LibreOffice;
+    // aqui o Word numera ao atualizar os campos, que o documento pede ao abrir)
+    temSumario = spec.sumario !== false;
+    if (temSumario) corpo += par(run("SUMÁRIO"), { estilo: "TituloSumario", quebra: true }) + "@@SUMARIO@@";
+    corpo += blocos(ctx, conteudo, D, largA, true).replace('<w:pStyle w:val="Heading1"/>', '<w:pStyle w:val="Heading1"/><w:pageBreakBefore/>');
+    if (spec.referencias && spec.referencias.length)
+      corpo += tituloSemNumero(ctx, "Referências") + spec.referencias.map(r => par(inline(r), { estilo: "Referencia" })).join("");
+    if (spec.glossario && spec.glossario.length)
+      corpo += tituloSemNumero(ctx, "Glossário") + spec.glossario.map(([t, d]) => par(run(t + ": ", { b: true }) + inline(d), { estilo: "SemRecuo", depois: 120 })).join("");
+    for (const [chave, rotulo] of [["apendices", "APÊNDICE"], ["anexos", "ANEXO"]])
+      (spec[chave] || []).forEach((ap, k) => { corpo += tituloSemNumero(ctx, `${rotulo} ${String.fromCharCode(65 + k)} – ${ap.titulo}`) + blocos(ctx, ap.corpo || [], D, largA, false); });
+    let e = ctx.titulos.filter(t => t[0] <= 3).map(([nv, t, marca]) => par(`<w:hyperlink w:anchor="${marca}" w:history="1">${run(t)}</w:hyperlink>`, { estilo: `TOC${nv}`, tabs: [["right", largA, "dot"]] })).join("");
+    if (e) {
+      e = e.replace("</w:pPr>", '</w:pPr><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> TOC \\o "1-3" \\h \\z \\u </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r>');
+      const k = e.lastIndexOf("</w:p>");
+      e = e.slice(0, k) + '<w:r><w:fldChar w:fldCharType="end"/></w:r>' + e.slice(k);
+    }
+    corpo = corpo.replace("@@SUMARIO@@", () => e);
+    corpo += secao(rh2, rf2, MARG_ABNT, 1.2, 1.2, true);
+  }
+  ["styles", "numbering", "settings"].forEach(t => ctx.rel(D, t, `${t}.xml`));
+  ctx.rel(D, "customXml", "../customXml/item1.xml");
+  return { ctx, documento: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NS}><w:body>${corpo}</w:body></w:document>`, partes, temSumario };
+}
+
+const R_OFFICE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+const TIPOS_REL = { image: "image", header: "header", footer: "footer", styles: "styles", numbering: "numbering", settings: "settings", customXml: "customXml" };
+const VERSAO_TIMBRADOR = "2026-09-16";
+// Namespace da ficha embutida. A leitura aceita qualquer namespace terminado em "timbrador:ficha", inclusive o
+// dos documentos emitidos antes do white label.
+const NS_FICHA = "urn:timbrador:ficha", MARCA_FICHA = "timbrador:ficha";
+const CAMPOS_FICHA = ["empresa", "tipo", "area", "area_nome", "numero", "ano", "codigo", "versao", "estado", "variante", "titulo", "subtitulo", "titulo_curto",
+  "classificacao", "local", "data_emissao", "elaborado_por", "revisado_por", "aprovado_por", "cargo_aprovador", "data_aprovacao", "vigencia",
+  "substitui", "substituido_por", "motivo_obsoleto", "identificacao", "historico", "modelo", "com_assinatura", "envolvidos", "assinatura_formato"];
+function fichaDe(spec) {
+  const f = {};
+  for (const k of CAMPOS_FICHA) { const v = spec[k]; if (v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && !v.length)) f[k] = k === "numero" && /^\d+$/.test(String(v)) ? parseInt(v, 10) : v; }
+  if (ORG.politica) f.padrao = ORG.politica;
+  f.timbrador = VERSAO_TIMBRADOR;
+  return f;
+}
+// json.dumps do Python (separadores ", " e ": "): a ficha sai igual à do gerador.
+const jsonPy = v => Array.isArray(v) ? "[" + v.map(jsonPy).join(", ") + "]"
+  : v && typeof v === "object" ? "{" + Object.entries(v).filter(([, x]) => x !== undefined).map(([k, x]) => JSON.stringify(k) + ": " + jsonPy(x)).join(", ") + "}"
+  : v === undefined ? "null" : JSON.stringify(v);
+function gerarDocx(spec, conteudo) {
+  const { ctx, documento, partes, temSumario } = montar(spec, conteudo);
+  const est = ESTADOS[spec.estado], agora = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+  const W = "application/vnd.openxmlformats-officedocument.wordprocessingml.";
+  const arquivos = [];
+  const add = (nome, txt) => arquivos.push([nome, new TextEncoder().encode(txt)]);
+  add("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
+    '<Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/>' +
+    `<Override PartName="/word/document.xml" ContentType="${W}document.main+xml"/><Override PartName="/word/styles.xml" ContentType="${W}styles+xml"/>` +
+    `<Override PartName="/word/numbering.xml" ContentType="${W}numbering+xml"/><Override PartName="/word/settings.xml" ContentType="${W}settings+xml"/>` +
+    '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' +
+    '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>' +
+    '<Override PartName="/docProps/custom.xml" ContentType="application/vnd.openxmlformats-officedocument.custom-properties+xml"/>' +
+    '<Override PartName="/customXml/itemProps1.xml" ContentType="application/vnd.openxmlformats-officedocument.customXmlProperties+xml"/>' +
+    Object.entries(partes).map(([p, [t]]) => `<Override PartName="/${p}" ContentType="${W}${t === "hdr" ? "header" : "footer"}+xml"/>`).join("") + "</Types>");
+  add("_rels/.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    `<Relationship Id="rId1" Type="${R_OFFICE}officeDocument" Target="word/document.xml"/>` +
+    '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>' +
+    `<Relationship Id="rId3" Type="${R_OFFICE}extended-properties" Target="docProps/app.xml"/><Relationship Id="rId4" Type="${R_OFFICE}custom-properties" Target="docProps/custom.xml"/></Relationships>`);
+  const visiveis = [["Timbrador - código", spec.codigo], ["Timbrador - versão", spec.versao], ["Timbrador - estado", est.rotulo], ["Timbrador - empresa", spec.empresa]];
+  add("docProps/custom.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">' +
+    visiveis.map(([n, v], i) => `<property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="${i + 2}" name="${esc(n)}"><vt:lpwstr>${esc(v)}</vt:lpwstr></property>`).join("") + "</Properties>");
+  add("customXml/item1.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><ficha xmlns="${NS_FICHA}">${esc(jsonPy(fichaDe(spec)))}</ficha>`);
+  add("customXml/itemProps1.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><ds:datastoreItem ds:itemID="{6F2A1C3E-9B1D-4C55-8E0A-3C1A7B2D9F10}" xmlns:ds="http://schemas.openxmlformats.org/officeDocument/2006/customXml"><ds:schemaRefs><ds:schemaRef ds:uri="' + NS_FICHA + '"/></ds:schemaRefs></ds:datastoreItem>');
+  add("customXml/_rels/item1.xml.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps" Target="itemProps1.xml"/></Relationships>');
+  add("docProps/core.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" ' +
+    'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">' +
+    `<dc:title>${esc(spec.titulo)}</dc:title><dc:subject>${esc(spec.codigo)}</dc:subject><dc:creator>${esc(spec.elaborado_por || EMPRESA.razao || EMPRESA.marca)}</dc:creator>` +
+    `<cp:keywords>${esc(spec.codigo)}; v${esc(spec.versao)}; ${est.rotulo}</cp:keywords><cp:contentStatus>${est.rotulo}</cp:contentStatus><cp:version>${esc(spec.versao)}</cp:version>` +
+    `<dcterms:created xsi:type="dcterms:W3CDTF">${agora}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${agora}</dcterms:modified></cp:coreProperties>`);
+  add("docProps/app.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">' +
+    `<Application>Microsoft Office Word</Application><Company>${esc(EMPRESA.razao || EMPRESA.marca)}</Company></Properties>`);
+  add("word/document.xml", documento);
+  add("word/styles.xml", estilosXml());
+  add("word/numbering.xml", numeracaoXml(ctx));
+  add("word/settings.xml", settingsXml(temSumario));
+  for (const [p, [t, c]] of Object.entries(partes)) add(p, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:${t} ${NS}>${c}</w:${t}>`);
+  for (const [parte, lst] of Object.entries(ctx.rels)) {
+    const [d, b] = [parte.slice(0, parte.lastIndexOf("/")), parte.slice(parte.lastIndexOf("/") + 1)];
+    add(`${d}/_rels/${b}.rels`, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      lst.map(([rid, t, a]) => `<Relationship Id="${rid}" Type="${R_OFFICE}${TIPOS_REL[t]}" Target="${a}"/>`).join("") + "</Relationships>");
+  }
+  for (const [nome, dados] of ctx.midia) arquivos.push([`word/media/${nome}`, dados]);
+  const blob = zipar(arquivos);
+  blob.temSumario = temSumario;
+  blob.avisos = ctx.avisos;
+  return blob;
+}
+function nomeArquivo(spec) {
+  const tr = { "á": "a", "à": "a", "â": "a", "ã": "a", "é": "e", "ê": "e", "í": "i", "ó": "o", "ô": "o", "õ": "o", "ú": "u", "ü": "u", "ç": "c" };
+  const slug = spec.titulo.toLowerCase().replace(/[áàâãéêíóôõúüç]/g, c => tr[c]).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
+  return `${spec.codigo.replace("/", "-")}_v${spec.versao}_${spec.estado}_${slug}.docx`;
+}
+/* ======================================================================= lista mestra (mesmo arquivo usado pela habilidade)
+   Um lista-mestra.json ao lado dos documentos: uma entrada por código, com a versão vigente. Serve para
+   dar o próximo número livre, recusar número repetido e registrar o que foi publicado. */
+const LISTA_ARQUIVO = "lista-mestra.json";
+const listaVazia = () => ({ lista_mestra: ORG.organizacao, padrao: ORG.politica, atualizado_em: "", documentos: [] });
+function listaNormalizar(d) {
+  const l = (d && typeof d === "object") ? d : {};
+  if (!Array.isArray(l.documentos)) l.documentos = [];
+  return { ...listaVazia(), ...l };
+}
+const semAcento = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+const mesmaFamilia = (d, s) => d.empresa === s.empresa && d.tipo === s.tipo && d.area === s.area &&
+  (!TIPOS_CURTOS[s.tipo] || String(d.ano || "") === String(s.ano || ""));
+function proximoNumero(lista, s) {
+  const usados = listaNormalizar(lista).documentos.filter(d => mesmaFamilia(d, s)).map(d => parseInt(d.numero, 10) || 0);
+  return usados.length ? Math.max(...usados) + 1 : 1;
+}
+// Confere o documento contra a lista antes de gerar. `atualizacao` = o arquivo veio timbrado e é nova versão do mesmo código.
+/* Regra de título da política de documentação: o título diz só o assunto; o tipo já sai impresso acima dele
+   ("POLÍTICA / COMERCIAL", "TERMO – ABERTURA DO PORTAL DE ATENDIMENTO"). Tira do começo do título o nome do tipo,
+   o conectivo e um separador que venham em seguida. */
+const OUTROS_NOMES = { POP: ["Procedimento operacional", "Procedimento"], CI: ["Comunicação"], RO: ["Registro de ocorrência"], PRO: ["Proposta"], TER: ["Termo"] };
+function tituloSemTipo(titulo, tipo) {
+  const t = String(titulo || "").trim();
+  const nomes = [TIPOS_CURTOS[tipo], TIPOS_LONGOS[tipo], ...(OUTROS_NOMES[tipo] || [])].filter(Boolean).sort((a, b) => b.length - a.length);
+  const palavras = t.split(/\s+/);
+  for (const nome of nomes) {
+    const n = nome.split(/\s+/).length;
+    if (palavras.length <= n || semAcento(palavras.slice(0, n).join(" ")) !== semAcento(nome)) continue;
+    const resto = palavras.slice(n).join(" ").replace(/^[–—:\-]+\s*/, "").replace(/^(de|da|do|das|dos|para|sobre)\s+/i, "").replace(/^[–—:\-]+\s*/, "").trim();
+    return resto.length >= 3 ? resto.charAt(0).toUpperCase() + resto.slice(1) : t;
+  }
+  return t;
+}
+function conferirLista(lista, spec, atualizacao) {
+  const erros = [], avisos = [];
+  if (!lista) return { erros, avisos };
+  const docs = listaNormalizar(lista).documentos;
+  if (!spec.numero) return { erros, avisos };   // minuta sem número: nada a conferir, nada a reservar
+  const mesmo = docs.find(d => d.codigo === spec.codigo && d.numero);
+  const livre = String(proximoNumero(lista, spec)).padStart(3, "0");
+  if (mesmo && atualizacao && semAcento(mesmo.titulo) !== semAcento(spec.titulo))
+    avisos.push(`O título muda nesta versão: "${mesmo.titulo}" passa a "${spec.titulo}". A lista mestra fica com o novo.`);
+  else if (mesmo && semAcento(mesmo.titulo) !== semAcento(spec.titulo))
+    erros.push({ campo: "numero", msg: `O código ${spec.codigo} já é "${mesmo.titulo}" na lista mestra (${mesmo.estado}, v${mesmo.versao}). Use o próximo número livre (${livre}) ou envie aquele documento para gerar a nova versão.` });
+  else if (mesmo && !atualizacao)
+    avisos.push(`${spec.codigo} já estava na lista mestra (v${mesmo.versao}, ${mesmo.estado}): a entrada foi atualizada.`);
+  const homonimo = docs.find(d => d.codigo !== spec.codigo && semAcento(d.titulo) === semAcento(spec.titulo));
+  if (homonimo) avisos.push(`Já existe ${homonimo.codigo} com o mesmo título ("${homonimo.titulo}"). Confirme se não é o mesmo documento.`);
+  return { erros, avisos };
+}
+const registroDe = (spec, arquivo) => ({
+  codigo: spec.codigo, titulo: spec.titulo, empresa: spec.empresa, tipo: spec.tipo, area: spec.area,
+  numero: parseInt(spec.numero, 10) || null, ano: spec.ano || null, versao: spec.versao, estado: spec.estado,
+  data: spec.data_aprovacao || spec.data_emissao, responsavel: spec.elaborado_por || "",
+  substituido_por: spec.substituido_por || undefined, arquivo
+});
+const chaveRegistro = r => r.numero ? r.codigo : `${r.codigo}|${r.arquivo || ""}`;
+function mesclarLista(lista, registro) {
+  const l = listaNormalizar(lista);
+  const chave = chaveRegistro(registro);
+  const i = l.documentos.findIndex(d => chaveRegistro(d) === chave);
+  const antes = i >= 0 ? l.documentos[i] : null;
+  const novo = { ...(antes || {}), ...registro, registrado_em: (antes && antes.registrado_em) || agoraBR(), atualizado_em: agoraBR() };
+  // campos que só valem para a entrada obsoleta não sobrevivem à republicação do código
+  for (const k of ["substituido_por", "motivo_obsoleto"]) if (!(k in registro)) delete novo[k];
+  if (i >= 0) l.documentos[i] = novo; else l.documentos.push(novo);
+  const ordem = d => [String(d.empresa || ""), String(d.tipo || ""), String(d.area || ""), String(d.ano || "")];
+  l.documentos.sort((a, b) => {
+    const A = ordem(a), B = ordem(b);
+    for (let i = 0; i < A.length; i++) if (A[i] !== B[i]) return A[i] < B[i] ? -1 : 1;
+    return (parseInt(a.numero, 10) || 0) - (parseInt(b.numero, 10) || 0) || String(a.arquivo || "").localeCompare(String(b.arquivo || ""));
+  });
+  l.atualizado_em = agoraBR();
+  return l;
+}
+const agoraBR = () => { const d = new Date(); const p = n => String(n).padStart(2, "0"); return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+const listaTexto = lista => JSON.stringify(listaNormalizar(lista), null, 2);
+
+/* Inventário: lê a identificação de cada .docx da pasta (ficha, cabeçalho ou nome do arquivo) para montar a lista
+   do que já foi publicado antes do controle existir. Mesmas regras do --inventariar do gerador. */
+const RE_NOME = /^([A-Z0-9]{2,6})-([A-Z]{2,4})-([A-Z]{2,4})-(\d{3}|XXX)(?:-(\d{4}))?_v([0-9][0-9.]*(?:-r\d+)?)_([A-Z_]+)_(.+)\.docx$/i;
+const ORDEM_ESTADO = { OBSOLETO: 0, RASCUNHO: 1, MINUTA: 2, EM_REVISAO: 3, EM_APROVACAO: 3, OFICIAL: 4 };
+const RE_VERSAO_OK = /^\d+\.\d+(-r\d+)?$/;
+// Nome das pastas de tipo, no padrão das que já existem na rede ("Políticas (POL)"); usado para reconhecer
+// a pasta pelo nome e para criá-la quando falta.
+const PASTA_DO_TIPO = { RO: "Registros de Ocorrência", CI: "Comunicações Internas", TER: "Termos", PRO: "Propostas",
+  POP: "Procedimentos Operacionais Padrão", POL: "Políticas", REG: "Regulamentos", PLN: "Planos",
+  MAN: "Manuais", INS: "Instruções de Trabalho", REL: "Relatórios", PRJ: "Projetos", COM: "Comunicados", OFI: "Ofícios",
+  DEC: "Declarações", ATA: "Atas", AUT: "Autorizações", NOT: "Notificações", CTR: "Contratos", FOR: "Formulários", REC: "Recibos" };
+const ehTipo = p => !!(TIPOS_CURTOS[p] || TIPOS_LONGOS[p]);
+// Aceita "Políticas (POL)", "POP", "REG - regulamentos" e o nome por extenso ("Políticas"). A sigla só vale
+// entre parênteses ou como palavra em maiúsculas: "Termos" não é TER, e "Projetos" (pasta de projetos) não é PRJ.
+const siglaDaPasta = nome => {
+  const p = /\(([A-Za-z]{2,4})\)\s*$/.exec(nome);
+  if (p && ehTipo(p[1].toUpperCase())) return p[1].toUpperCase();
+  const w = (nome.match(/\b[A-Z]{2,4}\b/g) || []).find(ehTipo);
+  if (w) return w;
+  const n = semAcento(nome);
+  return Object.keys(PASTA_DO_TIPO).find(k => k !== "PRJ" && semAcento(PASTA_DO_TIPO[k]) === n) || null;
+};
+function chaveVersao(v) {
+  const [base, rod] = String(v || "0").split("-r");
+  const [x, y] = base.split(".").concat(["0"]).slice(0, 2).map(n => parseInt(n, 10) || 0);
+  return [x, y, rod ? 0 : 1, parseInt(rod, 10) || 0];
+}
+const comparaVersao = (a, b) => { const A = chaveVersao(a), B = chaveVersao(b); for (let i = 0; i < 4; i++) if (A[i] !== B[i]) return A[i] - B[i]; return 0; };
+function fichaDoNome(nome) {
+  const m = RE_NOME.exec(nome);
+  if (!m) return null;
+  const s = { empresa: m[1].toUpperCase(), tipo: m[2].toUpperCase(), area: m[3].toUpperCase(), versao: m[6],
+    estado: m[7].toUpperCase(), titulo: m[8].replace(/-/g, " ").trim().replace(/^./, c => c.toUpperCase()) };
+  if (m[4].toUpperCase() !== "XXX") s.numero = parseInt(m[4], 10);
+  if (m[5]) s.ano = parseInt(m[5], 10);
+  return s;
+}
+async function fichaRapida(buf) {
+  const ler = await dezipar(buf);
+  for (const n of ler.nomes.filter(n => /^customXml\/item\d+\.xml$/.test(n))) {
+    const x = await ler(n);
+    if (x && x.includes(MARCA_FICHA)) {
+      try {
+        const spec = JSON.parse(new DOMParser().parseFromString(x, "application/xml").documentElement.textContent || "{}");
+        const ma = /\/(\d{4})$/.exec(spec.codigo || "");
+        if (ma && !spec.ano) spec.ano = +ma[1];
+        return { spec, origem: "ficha" };
+      } catch (e) { /* ficha ilegível: cai para o cabeçalho */ }
+    }
+  }
+  let cab = "";
+  for (const n of ler.nomes.filter(n => /^word\/(header|footer)\d*\.xml$/.test(n))) cab += " " + ((await ler(n)) || "").replace(/<[^>]+>/g, " ");
+  cab = cab.replace(/\s+/g, " ");
+  const m = RE_CODIGO.exec(cab);
+  if (!m) return { spec: {}, origem: "sem_timbrado" };
+  const spec = { empresa: m[1], tipo: m[2], area: m[3], versao: m[6] };
+  if (m[4] !== "XXX") spec.numero = +m[4];
+  if (m[5]) spec.ano = +m[5];
+  for (const [k, e] of Object.entries(ESTADOS)) if (cab.includes(e.tarja.split("  ·  ")[0])) spec.estado = k;
+  if (cab.includes("DOCUMENTO OFICIAL")) spec.estado = "OFICIAL";
+  const mo = /Aprovado por (.+?) em (\d{2}\/\d{2}\/\d{4})/.exec(cab);
+  if (mo) { spec.aprovado_por = mo[1].trim(); spec.data_aprovacao = mo[2]; }
+  return { spec, origem: "cabecalho" };
+}
+// Pastas puladas na varredura: o arquivo morto não faz parte do que está em uso.
+const PASTAS_IGNORADAS = ["obsoletos"];
+async function inventariar(dir, lista, aoAndar) {
+  const achados = [], semId = [], ignorados = [], modelos = [];
+  async function andar(handle, caminho) {
+    for await (const [nome, h] of handle.entries()) {
+      if (nome.startsWith("~$") || nome.startsWith(".")) continue;
+      if (h.kind === "directory") {
+        if (PASTAS_IGNORADAS.includes(nome.toLowerCase())) continue;
+        await andar(h, caminho ? `${caminho}/${nome}` : nome); continue;
+      }
+      if (!nome.toLowerCase().endsWith(".docx")) { if (!nome.toLowerCase().endsWith(".json")) ignorados.push(nome); continue; }
+      if (aoAndar) aoAndar(achados.length + semId.length + 1, nome);
+      let r;
+      try { r = await fichaRapida(await (await h.getFile()).arrayBuffer()); }
+      catch (e) { semId.push([nome, "não foi possível abrir o arquivo"]); continue; }
+      if (r.spec && r.spec.modelo) { modelos.push(nome); continue; }   // arquivo de partida: não é documento
+      const peloNome = fichaDoNome(nome);
+      let { spec, origem } = r;
+      if (origem === "sem_timbrado") { if (!peloNome) { semId.push([nome, "sem ficha, sem código no cabeçalho e fora do padrão de nome"]); continue; } spec = peloNome; origem = "nome"; }
+      else if (peloNome) for (const [k, v] of Object.entries(peloNome)) if (spec[k] === undefined) spec[k] = v;
+      const sigla = siglaDaPasta(caminho.split("/").pop() || "");
+      if (sigla && !spec.tipo) spec.tipo = sigla;
+      if (!spec.tipo) { semId.push([nome, "não deu para saber o tipo do documento"]); continue; }
+      spec.empresa = spec.empresa || ORG.padrao; spec.estado = spec.estado || "MINUTA"; spec.versao = spec.versao || "1.0";
+      spec.titulo = spec.titulo || nome.replace(/\.docx$/i, "");
+      spec.codigo = spec.codigo || `${spec.empresa}-${spec.tipo}-${spec.area || "ADM"}-${spec.numero ? String(spec.numero).padStart(3, "0") : "XXX"}${TIPOS_CURTOS[spec.tipo] && spec.ano ? "/" + spec.ano : ""}`;
+      achados.push({ spec, origem, nome, pasta: caminho || "." });
+    }
+  }
+  await andar(dir, "");
+  const porCodigo = {};
+  for (const a of achados) { const k = a.spec.numero ? a.spec.codigo : `${a.spec.codigo}|${a.nome}`; (porCodigo[k] = porCodigo[k] || []).push(a); }
+  const conflitos = [], varias = [];
+  let atualizada = listaNormalizar(lista);
+  for (const [codigo, itens] of Object.entries(porCodigo).sort()) {
+    itens.sort((a, b) => comparaVersao(a.spec.versao, b.spec.versao) || (ORDEM_ESTADO[a.spec.estado] || 0) - (ORDEM_ESTADO[b.spec.estado] || 0));
+    const atual = itens[itens.length - 1];
+    const titulos = [...new Set(itens.map(i => semAcento(i.spec.titulo)).filter(Boolean))];
+    if (titulos.length > 1) conflitos.push([codigo, [...new Set(itens.map(i => i.spec.titulo))]]);
+    if (itens.length > 1) varias.push([codigo, itens.map(i => `${i.spec.versao} ${i.spec.estado}`)]);
+    const reg = registroDe(atual.spec, atual.nome);
+    reg.pasta = atual.pasta; reg.origem = atual.origem;
+    if (itens.length > 1) reg.arquivos = itens.length;
+    atualizada = mesclarLista(atualizada, reg);
+  }
+  const conta = chave => achados.reduce((m, a) => (m[a[chave] || a.spec[chave]] = (m[a[chave] || a.spec[chave]] || 0) + 1, m), {});
+  const versoesRuins = [...new Set(achados.filter(a => !RE_VERSAO_OK.test(String(a.spec.versao || ""))).map(a => `${a.spec.codigo}: v${a.spec.versao}`))];
+  const semNumero = achados.filter(a => !a.spec.numero).map(a => `${a.spec.codigo} — ${a.nome}`);
+  return { lista: atualizada, relatorio: { docx: achados.length, documentos: Object.keys(porCodigo).length,
+    porOrigem: conta("origem"), porTipo: conta("tipo"), porEstado: conta("estado"), conflitos, varias, semId, ignorados, modelos,
+    versoesRuins, semNumero } };
+}
+
+/* ======================================================================= ZIP (escrita e leitura, sem bibliotecas) */
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = d => { let c = 0xFFFFFFFF; for (let i = 0; i < d.length; i++) c = CRC[(c ^ d[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+function zipar(arquivos) {
+  const partes = [], central = []; let off = 0;
+  for (const [nome, dados] of arquivos) {
+    const n = new TextEncoder().encode(nome), crc = crc32(dados);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true);
+    h.setUint16(10, 0, true); h.setUint16(12, 0x21, true); h.setUint32(14, crc, true); h.setUint32(18, dados.length, true);
+    h.setUint32(22, dados.length, true); h.setUint16(26, n.length, true); h.setUint16(28, 0, true);
+    partes.push(new Uint8Array(h.buffer), n, dados);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(10, 0, true);
+    c.setUint16(12, 0, true); c.setUint16(14, 0x21, true); c.setUint32(16, crc, true); c.setUint32(20, dados.length, true); c.setUint32(24, dados.length, true);
+    c.setUint16(28, n.length, true); c.setUint32(42, off, true);
+    central.push(new Uint8Array(c.buffer), n);
+    off += 30 + n.length + dados.length;
+  }
+  const tamC = central.reduce((a, p) => a + p.length, 0);
+  const e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, arquivos.length, true); e.setUint16(10, arquivos.length, true);
+  e.setUint32(12, tamC, true); e.setUint32(16, off, true);
+  return new Blob([...partes, ...central, new Uint8Array(e.buffer)], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+}
+async function dezipar(buf) {
+  const u = new Uint8Array(buf), dv = new DataView(buf), saida = {};
+  let e = u.length - 22;
+  while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
+  if (e < 0) throw new Error("O arquivo não é um .docx válido.");
+  const total = dv.getUint16(e + 10, true); let p = dv.getUint32(e + 16, true);
+  for (let i = 0; i < total; i++) {
+    const metodo = dv.getUint16(p + 10, true), tam = dv.getUint32(p + 20, true);
+    const ln = dv.getUint16(p + 28, true), lx = dv.getUint16(p + 30, true), lc = dv.getUint16(p + 32, true), loc = dv.getUint32(p + 42, true);
+    const nome = new TextDecoder().decode(u.subarray(p + 46, p + 46 + ln));
+    const ini = loc + 30 + dv.getUint16(loc + 26, true) + dv.getUint16(loc + 28, true);
+    saida[nome] = { metodo, dados: u.subarray(ini, ini + tam) };
+    p += 46 + ln + lx + lc;
+  }
+  const ler = async nome => {
+    const f = saida[nome]; if (!f) return null;
+    if (f.metodo === 0) return new TextDecoder().decode(f.dados);
+    const s = new Blob([f.dados]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new TextDecoder().decode(await new Response(s).arrayBuffer());
+  };
+  ler.nomes = Object.keys(saida);
+  return ler;
+}
+
+/* ======================================================================= leitura do conteúdo */
+const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const limparNumero = t => t.replace(/^\s*(\d+(\.\d+)*[.)]?|[IVXLC]+[.)])\s+(?=\S)/, "").trim();
+
+/* ======================================================================= leitura de documento já timbrado */
+const RE_CODIGO = /\b([A-Z0-9]{2,6})-([A-Z]{2,3})-([A-Z]{2,3})-(\d{3}|XXX)(?:\/(\d{4}))?\s+·\s+(?:v|[Vv]ersão\s+)([0-9][0-9.]*(?:-r\d+)?)/;
+function dataNumerica(txt) {
+  const m = /(\d{1,2}) de (\S+) de (\d{4})/.exec(txt);
+  if (!m || !MESES.includes(m[2].toLowerCase())) return null;
+  return `${String(+m[1]).padStart(2, "0")}/${String(MESES.indexOf(m[2].toLowerCase()) + 1).padStart(2, "0")}/${m[3]}`;
+}
+async function lerTimbrado(ler, nomes, doc, numDoc, h) {
+  const { filhos, filho, attr, textoPar } = h;
+  const info = { origem: "sem_timbrado", avisos: [] };
+  let spec = {};
+  for (const n of nomes.filter(n => /^customXml\/item\d+\.xml$/.test(n))) {
+    const x = await ler(n);
+    if (x && x.includes(MARCA_FICHA)) {
+      const el = new DOMParser().parseFromString(x, "application/xml").documentElement;
+      try { spec = JSON.parse(el.textContent || "{}"); info.origem = "ficha"; const ma = /\/(\d{4})$/.exec(spec.codigo || ""); if (ma && !spec.ano) spec.ano = +ma[1]; } catch (e) { /* ficha ilegível: tenta o cabeçalho */ }
+      break;
+    }
+  }
+  let cab = "";
+  for (const n of nomes.filter(n => /^word\/(header|footer)\d*\.xml$/.test(n))) cab += " " + ((await ler(n)) || "").replace(/<[^>]+>/g, " ");
+  cab = cab.replace(/\s+/g, " ");
+  if (info.origem !== "ficha") {
+    const m = RE_CODIGO.exec(cab);
+    if (!m) return null;
+    info.origem = "cabecalho";
+    Object.assign(spec, { empresa: m[1], tipo: m[2], area: m[3], versao: m[6] });
+    if (m[4] !== "XXX") spec.numero = +m[4];
+    if (m[5]) spec.ano = +m[5];
+    for (const [k, e] of Object.entries(ESTADOS)) if (cab.includes(e.tarja.split("  ·  ")[0])) spec.estado = k;
+    if (cab.includes("DOCUMENTO OFICIAL")) spec.estado = "OFICIAL";
+    const mo = /Aprovado por (.+?) em (\d{2}\/\d{2}\/\d{4})/.exec(cab); if (mo) { spec.aprovado_por = mo[1].trim(); spec.data_aprovacao = mo[2]; }
+    const ms = /SUBSTITUÍDO POR (\S+)/.exec(cab); if (ms) spec.substituido_por = ms[1];
+    info.avisos.push("Documento sem ficha (gerado antes de 16/09/2026): dados lidos do cabeçalho. Confira título e responsáveis.");
+  }
+  const tiposLista = {};
+  const fmtAbs = {};
+  for (const a of numDoc.getElementsByTagNameNS(W_NS, "abstractNum")) {
+    const lv = filhos(a, "lvl")[0];
+    const txt = attr(filho(lv, "lvlText"), "val") || "", fmt = attr(filho(lv, "numFmt"), "val");
+    fmtAbs[attr(a, "abstractNumId")] = txt.includes("☐") ? "checklist" : fmt === "lowerLetter" ? "alineas" : fmt === "decimal" ? "numerada" : "marcadores";
+  }
+  for (const n of numDoc.getElementsByTagNameNS(W_NS, "num")) tiposLista[attr(n, "numId")] = fmtAbs[attr(filho(n, "abstractNumId"), "val")] || "marcadores";
+
+  let elementos = [];
+  const achatar = el => { for (const c of el.childNodes) { if (c.namespaceURI !== W_NS) continue; if (c.localName === "sdt") { const s = filho(c, "sdtContent"); if (s) achatar(s); } else if (c.localName === "p" || c.localName === "tbl") elementos.push(c); } };
+  achatar(doc.getElementsByTagNameNS(W_NS, "body")[0]);
+  const iCapa = elementos.findIndex(el => el.localName === "p" && filho(el, "pPr") && filho(filho(el, "pPr"), "sectPr"));
+  if (iCapa >= 0) { elementos = elementos.slice(iCapa + 1); spec.variante = spec.variante || "longo"; }
+
+  const corpo = []; let destino = null, legenda = null, pular = null, identLida = false, lista = null, figuras = 0;
+  const controle = {}, hist = [];
+  const alvo = () => destino && destino.corpo ? destino.corpo : corpo;
+  for (const el of elementos) {
+    if (el.localName === "tbl") {
+      lista = null;
+      let cabecalho = false, bordas = false;
+      const linhas = filhos(el, "tr").map(tr => {
+        const trPr = filho(tr, "trPr"); if (trPr && filho(trPr, "tblHeader")) cabecalho = true;
+        return filhos(tr, "tc").map(tc => filhos(tc, "p").map(p => { const pp = filho(p, "pPr"); if (pp && filho(pp, "pBdr")) bordas = true; return textoPar(p).texto; }).filter(Boolean));
+      });
+      if (pular === "controle") {
+        if (!cabecalho && linhas[0] && linhas[0].length === 2) linhas.forEach(l => { if (l.length === 2) controle[l[0].join(" ").replace(/\*/g, "")] = l[1].join(" ").replace(/\*/g, ""); });
+        else if (cabecalho) linhas.slice(1).forEach(l => { const v = l.map(c => c.join(" ")).concat(["", "", "", ""]); hist.push({ versao: v[0], data: v[1], descricao: v[2], responsavel: v[3] }); });
+        continue;
+      }
+      if (bordas) {
+        const itens = [];
+        linhas.forEach(l => l.forEach(c => { if (!c.length) return; const a = { nome: c[0] }; c.slice(1, 3).forEach(x => { if (/^(CNPJ|CPF|RG|OAB|CRC)\b/.test(x)) a.documento = x; else if (!a.cargo) a.cargo = x; else a.documento = x; }); itens.push(a); }));
+        const ult = alvo()[alvo().length - 1];
+        if (ult && ult.t === "assinaturas") ult.itens.push(...itens); else alvo().push({ t: "assinaturas", itens });
+        continue;
+      }
+      const planas = linhas.map(l => l.map(c => c.join(" ")));
+      const gridEl = filho(el, "tblGrid"); const larg = gridEl ? filhos(gridEl, "gridCol").map(g => +attr(g, "w")) : [];
+      const larguras = larg.length && new Set(larg).size > 1 ? larg.map(w => Math.round(w / Math.min(...larg) * 100) / 100) : null;
+      if (legenda) {
+        const b = { t: "tabela", tipo: legenda[0], titulo: legenda[1] };
+        if (larguras) b.larguras = larguras;
+        if (cabecalho) { b.cabecalho = planas[0]; b.linhas = planas.slice(1); } else b.linhas = planas;
+        alvo().push(b); legenda = null; continue;
+      }
+      if (planas.length && planas.every(l => l.length === 2 && l[0].length <= 40)) {
+        const itens = planas.map(l => [l[0].replace(/\*/g, "").replace(/:$/, ""), l[1]]);
+        if (!identLida && !corpo.length && spec.variante !== "longo") { spec.identificacao = itens.filter(i => i[0] !== "Empresa"); identLida = true; }
+        else alvo().push({ t: "campos", itens });
+        continue;
+      }
+      const b = { t: "tabela", tipo: "Quadro" };
+      if (larguras) b.larguras = larguras;
+      if (cabecalho) { b.cabecalho = planas[0]; b.linhas = planas.slice(1); } else b.linhas = planas;
+      alvo().push(b); continue;
+    }
+    const pPr = filho(el, "pPr");
+    const estilo = attr(pPr && filho(pPr, "pStyle"), "val");
+    const { texto } = textoPar(el);
+    const puro = texto.replace(/\*/g, "");
+    if (!puro) { if (el.getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "blip").length) figuras++; continue; }
+    if (estilo === "TituloSumario") { pular = /^FOLHA DE CONTROLE/i.test(puro) ? "controle" : "sumario"; continue; }
+    if (pular && /^TOC\d$/.test(estilo || "")) continue;
+    if (pular === "controle" && estilo && !/^Heading/.test(estilo) && estilo !== "TituloSemNumero" && estilo !== "Normal") continue;
+    if (estilo && (/^Heading/.test(estilo) || estilo === "TituloSemNumero")) pular = null;
+    if (estilo === "TituloDocumento") { const m = /^(.*?)\s+[–-]\s+(.*)$/.exec(puro); if (m && !spec.titulo) spec.titulo = m[2].trim(); continue; }
+    if (RE_CODIGO.test(puro) && puro.includes("Emissão")) continue;
+    if (estilo && /^Heading\d$/.test(estilo)) { alvo().push({ t: `h${Math.min(+estilo.slice(7), 5)}`, texto: puro.replace(/^\d+(\.\d+)*\s+/, "") }); lista = null; continue; }
+    if (estilo === "TituloSemNumero") {
+      const up = puro.toUpperCase();
+      if (up.startsWith("REFERÊNCIAS")) { destino = "ref"; spec.referencias = []; }
+      else if (up.startsWith("GLOSSÁRIO")) { destino = "glo"; spec.glossario = []; }
+      else {
+        const m = /^(APÊNDICE|ANEXO)\s+[A-Z]+\s+[–-]\s+(.*)$/i.exec(puro);
+        if (m) { const chave = m[1].toUpperCase().startsWith("AP") ? "apendices" : "anexos"; const bl = { titulo: m[2].charAt(0) + m[2].slice(1).toLowerCase(), corpo: [] }; (spec[chave] = spec[chave] || []).push(bl); destino = bl; }
+        else alvo().push({ t: "h1", texto: puro, numerar: false });
+      }
+      continue;
+    }
+    if (estilo === "Legenda") { const m = /^(Tabela|Quadro|Figura|Gráfico)\s+\d+\s+[–-]\s*(.*)$/.exec(puro); legenda = m ? [m[1], m[2]] : ["Quadro", puro]; continue; }
+    if (estilo === "Fonte") { const ult = alvo()[alvo().length - 1]; if (ult && ult.t === "tabela") { if (puro.startsWith("Fonte:")) ult.fonte = texto.split(":").slice(1).join(":").trim(); else if (puro.startsWith("Nota:")) ult.nota = texto.split(":").slice(1).join(":").trim(); } continue; }
+    if (destino === "ref" && estilo === "Referencia") { spec.referencias.push(texto); continue; }
+    if (destino === "glo") { const m = /^\*\*(.+?):\*\*\s*(.*)$/.exec(texto) || /^(.+?):\s*(.*)$/.exec(puro); if (m) spec.glossario.push([m[1].replace(/\*/g, ""), m[2]]); continue; }
+    const numPr = pPr && filho(pPr, "numPr");
+    if (numPr) {
+      const tipo = tiposLista[attr(filho(numPr, "numId"), "val")] || "marcadores", ilvl = +(attr(filho(numPr, "ilvl"), "val") || 0);
+      if (ilvl > 0 && lista && lista.itens.length) { let u = lista.itens[lista.itens.length - 1]; if (typeof u === "string") u = lista.itens[lista.itens.length - 1] = { texto: u }; (u.sub = u.sub || []).push(texto); }
+      else { if (!(lista && lista.t === tipo && alvo()[alvo().length - 1] === lista)) { lista = { t: tipo, itens: [] }; alvo().push(lista); } lista.itens.push(texto); }
+      continue;
+    }
+    lista = null;
+    if (estilo === "CitacaoLonga") { alvo().push({ t: "citacao", texto }); continue; }
+    if (estilo === "Nota") { const m = /^\*\*(.+?):\*\*\s*(.*)$/.exec(texto); alvo().push(m ? { t: "nota", rotulo: m[1], texto: m[2] } : { t: "nota", texto }); continue; }
+    const rf = el.getElementsByTagNameNS(W_NS, "rFonts")[0];
+    if (rf && attr(rf, "ascii") === "Courier New") { const u = alvo()[alvo().length - 1]; if (u && u.t === "codigo") u.texto += "\n" + puro; else alvo().push({ t: "codigo", texto: puro }); continue; }
+    const jc = attr(pPr && filho(pPr, "jc"), "val");
+    if (jc === "right" && dataNumerica(puro) && puro.includes(",")) { const b = { t: "local_data", data: dataNumerica(puro) }; const local = puro.split(",")[0].trim(); if (local) b.local = local; alvo().push(b); continue; }
+    const bdr = pPr && filho(pPr, "pBdr");
+    if (bdr && filho(bdr, "left")) {
+      const m = /^\*\*(.+?):\*\*\s*(.*)$/.exec(texto), cor = (attr(filho(bdr, "left"), "color") || "").toUpperCase();
+      const nivel = cor === "C99700" ? "atencao" : cor === "B00020" ? "erro" : "info";
+      // rótulo seguido de texto que também começa em negrito: os dois negritos se fundem na leitura
+      const m2 = m ? null : /^\*\*([^*:]{1,60}):\s+([\s\S]*)$/.exec(texto);
+      alvo().push(m ? { t: "destaque", rotulo: m[1], texto: m[2], nivel } : m2 ? { t: "destaque", rotulo: m2[1], texto: "**" + m2[2], nivel } : { t: "destaque", texto, nivel }); continue;
+    }
+    const b = { t: "p", texto };
+    if (estilo === "SemRecuo") b.sem_recuo = true;
+    if (jc === "center" || jc === "right") b.alinhar = jc;
+    alvo().push(b);
+  }
+  const mapa = { "Título": "titulo", "Classificação": "classificacao", "Área responsável": "area_nome", "Elaborado por": "elaborado_por", "Revisado por": "revisado_por",
+    "Aprovado por": "aprovado_por", "Data de emissão": "data_emissao", "Substitui": "substitui", "Substituído por": "substituido_por" };
+  for (const [rot, k] of Object.entries(mapa)) { const v = controle[rot]; if (v && !v.startsWith("Pendente") && !(k in spec)) spec[k] = v; }
+  if (info.origem !== "ficha" && spec.titulo && spec.titulo.includes(" – ") && !spec.subtitulo) { const [t, st] = spec.titulo.split(" – "); spec.titulo = t; spec.subtitulo = st; }
+  if (hist.length && !(spec.historico && spec.historico.length)) spec.historico = hist;
+  if (figuras) info.avisos.push(`O documento tem ${figuras} figura(s) no corpo, que a página não mantém: recoloque no Word ou use a habilidade.`);
+  return { titulo: spec.titulo || "", blocos: corpo, tabelas: 0, ficha: spec, origem: info.origem, avisos: info.avisos };
+}
+
+async function lerDocx(buf) {
+  const ler = await dezipar(buf);
+  const xml = await ler("word/document.xml");
+  if (!xml) throw new Error("Não encontrei o texto dentro do .docx.");
+  const dom = s => new DOMParser().parseFromString(s, "application/xml");
+  const doc = dom(xml), estilosDoc = dom((await ler("word/styles.xml")) || "<x/>"), numDoc = dom((await ler("word/numbering.xml")) || "<x/>");
+  const filhos = (el, nome) => Array.from(el.childNodes).filter(n => n.namespaceURI === W_NS && n.localName === nome);
+  const filho = (el, nome) => filhos(el, nome)[0];
+  const attr = (el, nome) => el && el.getAttributeNS(W_NS, nome);
+
+  const estilos = {};
+  for (const s of estilosDoc.getElementsByTagNameNS(W_NS, "style")) {
+    const nome = (attr(filho(s, "name"), "val") || "").toLowerCase();
+    const ol = s.getElementsByTagNameNS(W_NS, "outlineLvl")[0];
+    let nivel = null;
+    const m = /^(heading|t[íi]tulo)\s*(\d)$/.exec(nome);
+    if (m) nivel = +m[2]; else if (ol && +attr(ol, "val") < 9) nivel = +attr(ol, "val") + 1;
+    estilos[attr(s, "styleId")] = { nome, nivel, titulo: /^(title|t[íi]tulo)$/.test(nome), lista: /list|lista/.test(nome) };
+  }
+  const formatos = {};
+  const abstratos = {};
+  for (const a of numDoc.getElementsByTagNameNS(W_NS, "abstractNum")) {
+    const lv = {}; for (const l of filhos(a, "lvl")) lv[attr(l, "ilvl")] = attr(filho(l, "numFmt"), "val");
+    abstratos[attr(a, "abstractNumId")] = lv;
+  }
+  for (const n of numDoc.getElementsByTagNameNS(W_NS, "num")) formatos[attr(n, "numId")] = abstratos[attr(filho(n, "abstractNumId"), "val")] || {};
+
+  const ligado = el => el && attr(el, "val") !== "0" && attr(el, "val") !== "false";
+  function textoPar(p) {
+    const segs = [];
+    const percorrer = el => {
+      for (const n of el.childNodes) {
+        if (n.namespaceURI !== W_NS) continue;
+        if (n.localName === "r") {
+          const rp = filho(n, "rPr"); const b = rp && ligado(filho(rp, "b")), i = rp && ligado(filho(rp, "i"));
+          let t = "";
+          for (const c of n.childNodes) { if (c.localName === "t") t += c.textContent; else if (c.localName === "tab" || c.localName === "br") t += " "; }
+          if (t) { const u = segs[segs.length - 1]; if (u && u.b === b && u.i === i) u.t += t; else segs.push({ t, b, i }); }
+        } else if (["hyperlink", "smartTag", "ins", "fldSimple", "sdt", "sdtContent"].includes(n.localName)) percorrer(n);
+      }
+    };
+    percorrer(p);
+    const todoNegrito = segs.length > 0 && segs.every(s => s.b || !s.t.trim());
+    const texto = segs.map(s => {
+      if (!s.t.trim() || (!s.b && !s.i) || todoNegrito && !s.i) return s.t;
+      const m = /^(\s*)(.*?)(\s*)$/s.exec(s.t), mk = s.b && s.i ? "***" : s.b ? "**" : "*";
+      return `${m[1]}${mk}${m[2]}${mk}${m[3]}`;
+    }).join("").replace(/\s+/g, " ").trim();
+    return { texto, todoNegrito };
+  }
+
+  const timbrado = await lerTimbrado(ler, ler.nomes, doc, numDoc, { filhos, filho, attr, textoPar });
+  if (timbrado && timbrado.blocos.length) return timbrado;
+
+  const itens = [];
+  const corpo = doc.getElementsByTagNameNS(W_NS, "body")[0];
+  const visitar = el => {
+    for (const n of el.childNodes) {
+      if (n.namespaceURI !== W_NS) continue;
+      if (n.localName === "sdt") { const c = filho(n, "sdtContent"); if (c) visitar(c); continue; }
+      if (n.localName === "tbl") {
+        const linhas = filhos(n, "tr").map(tr => filhos(tr, "tc").map(tc => filhos(tc, "p").map(p => textoPar(p).texto).filter(Boolean).join(" ")));
+        if (linhas.length) itens.push({ t: "tabela", linhas });
+        continue;
+      }
+      if (n.localName !== "p") continue;
+      const { texto, todoNegrito } = textoPar(n);
+      if (!texto) continue;
+      const pPr = filho(n, "pPr");
+      const st = estilos[attr(pPr && filho(pPr, "pStyle"), "val")] || {};
+      const ol = pPr && filho(pPr, "outlineLvl");
+      const numPr = pPr && filho(pPr, "numPr");
+      const jc = attr(pPr && filho(pPr, "jc"), "val");
+      let nivel = st.nivel; if (ol && +attr(ol, "val") < 9) nivel = +attr(ol, "val") + 1;
+      if (st.titulo) { itens.push({ t: "tituloDoc", texto: texto.replace(/\*/g, "") }); continue; }
+      if (nivel) { itens.push({ t: "h", nivel: Math.min(nivel, 5), texto: limparNumero(texto.replace(/\*/g, "")) }); continue; }
+      if (numPr) {
+        const numId = attr(filho(numPr, "numId"), "val"), ilvl = +(attr(filho(numPr, "ilvl"), "val") || 0);
+        if (numId && numId !== "0") { itens.push({ t: "li", ilvl, fmt: (formatos[numId] || {})[ilvl] || "bullet", texto }); continue; }
+      }
+      itens.push({ t: "p", texto, todoNegrito, centro: jc === "center" });
+    }
+  };
+  visitar(corpo);
+  // Texto em caixas de texto e formas (comum em arquivos vindos de PDF ou de modelos antigos): só é lido se o corpo não tiver nada.
+  if (!itens.length) for (const cx of doc.getElementsByTagNameNS(W_NS, "txbxContent")) visitar(cx);
+  const saida = organizar(itens);
+  if (timbrado) {
+    // Documento timbrado cujo corpo não foi reconhecido: aproveita a ficha e usa a leitura comum do texto.
+    timbrado.avisos = (timbrado.avisos || []).concat("O corpo do documento não pôde ser lido na estrutura do padrão; o texto foi aproveitado como está. Confira antes de gerar.");
+    return { ...timbrado, titulo: timbrado.titulo || saida.titulo, blocos: saida.blocos, tabelas: saida.tabelas };
+  }
+  return saida;
+}
+
+function lerTexto(str, markdown) {
+  const linhas = str.replace(/\r\n?/g, "\n").split("\n");
+  const itens = []; let buf = [];
+  const temVazias = linhas.some(l => !l.trim());
+  const soltar = () => { if (buf.length) { itens.push({ t: "p", texto: buf.join(" ").replace(/\s+/g, " ").trim(), texto_puro: true }); buf = []; } };
+  for (let i = 0; i < linhas.length; i++) {
+    const bruto = linhas[i], l = bruto.trim();
+    if (!l) { soltar(); continue; }
+    let m;
+    if ((m = /^(#{1,6})\s+(.*)$/.exec(l))) { soltar(); itens.push({ t: "h", nivel: Math.min(m[1].length, 5), texto: limparNumero(m[2].replace(/\*/g, "")), md: true }); continue; }
+    if (/^\|.*\|$/.test(l)) {
+      soltar(); const rows = [];
+      while (i < linhas.length && /^\|.*\|$/.test(linhas[i].trim())) {
+        const r = linhas[i].trim().slice(1, -1).split("|").map(c => c.trim());
+        if (!r.every(c => /^:?-{2,}:?$/.test(c))) rows.push(r);
+        i++;
+      }
+      i--; itens.push({ t: "tabela", linhas: rows }); continue;
+    }
+    const ind = bruto.length - bruto.trimStart().length >= 2 ? 1 : 0;
+    if ((m = /^[-*+•]\s+(.*)$/.exec(l))) { soltar(); itens.push({ t: "li", ilvl: ind, fmt: "bullet", texto: m[1] }); continue; }
+    if ((m = /^\d+[.)]\s+(.*)$/.exec(l))) { soltar(); itens.push({ t: "li", ilvl: ind, fmt: "decimal", texto: m[1] }); continue; }
+    if ((m = /^[a-z]\)\s+(.*)$/.exec(l))) { soltar(); itens.push({ t: "li", ilvl: ind, fmt: "lowerLetter", texto: m[1] }); continue; }
+    buf.push(l);
+    if (!temVazias) soltar();
+  }
+  soltar();
+  return organizar(itens);
+}
+
+const PREFIXO_TIPO = new RegExp("^(" + Object.values(TIPOS_CURTOS).concat(Object.values(TIPOS_LONGOS)).map(t => t.toUpperCase()).join("|") + ")\\s+[–-]\\s+", "i");
+function organizar(itens) {
+  // documento que já estava no padrão: descarta linha de controle e quadro de identificação antigos
+  itens = itens.filter(x => !(x.t === "p" && /^[A-Z0-9]{2,6}-[A-Z]+-[A-Z]+-\S+\s+·\s+Versão/.test(x.texto)) &&
+                           !(x.t === "tabela" && x.linhas[0] && /^\**Empresa\**$/.test(x.linhas[0][0])));
+  for (const x of itens) if ((x.t === "p" || x.t === "tituloDoc") && PREFIXO_TIPO.test(x.texto.replace(/\*/g, ""))) { x.texto = x.texto.replace(/\*/g, "").replace(PREFIXO_TIPO, ""); break; }
+  let titulo = "";
+  const iTit = itens.findIndex(x => x.t === "tituloDoc");
+  if (iTit >= 0) { titulo = itens[iTit].texto; itens.splice(iTit, 1); }
+  itens = itens.filter(x => x.t !== "tituloDoc");
+  const hs = itens.filter(x => x.t === "h");
+  if (!titulo) {
+    const primeiro = itens[0];
+    const mesmoNivel = primeiro && primeiro.t === "h" ? hs.filter(h => h.nivel === primeiro.nivel).length : 0;
+    if (primeiro && primeiro.t === "h" && mesmoNivel === 1 && itens.length > 1) { titulo = primeiro.texto; itens.shift(); }
+    else if (primeiro && primeiro.t === "p" && primeiro.texto.length <= 120 && itens.length > 1 &&
+             (primeiro.todoNegrito || primeiro.centro || (primeiro.texto_puro && !/[.:;,]$/.test(primeiro.texto)))) { titulo = primeiro.texto.replace(/\*/g, ""); itens.shift(); }
+  }
+  const restantes = itens.filter(x => x.t === "h");
+  const minimo = restantes.length ? Math.min(...restantes.map(h => h.nivel)) : 1;
+  const blocosSaida = [];
+  let lista = null, anterior = 0;
+  for (const x of itens) {
+    if (x.t !== "li") lista = null;
+    if (x.t === "h") {
+      let nv = x.nivel - minimo + 1; nv = Math.min(nv, anterior + 1, 5); anterior = nv;
+      blocosSaida.push({ t: `h${nv}`, texto: x.texto });
+    } else if (x.t === "p") blocosSaida.push(x.centro ? { t: "p", texto: x.texto, alinhar: "center", sem_recuo: true } : { t: "p", texto: x.texto });
+    else if (x.t === "tabela") {
+      const [cab, ...resto] = x.linhas;
+      const rotuloValor = x.linhas.length >= 2 && x.linhas.every(l => l.length === 2 && l[0] && l[0].replace(/\*/g, "").length <= 30);
+      if (rotuloValor) blocosSaida.push({ t: "campos", itens: x.linhas.map(l => [l[0].replace(/\*/g, "").replace(/:$/, ""), l[1]]) });
+      else blocosSaida.push(resto.length ? { t: "tabela", cabecalho: cab, linhas: resto } : { t: "tabela", linhas: x.linhas });
+    } else if (x.t === "li") {
+      if (x.ilvl > 0 && lista && lista.itens.length) {
+        const ult = lista.itens[lista.itens.length - 1];
+        ult.sub = ult.sub || []; ult.sub.push(x.texto);
+      } else {
+        const tipo = x.fmt === "decimal" ? "numerada" : /letter/i.test(x.fmt) ? "alineas" : "marcadores";
+        if (!lista || lista.t !== tipo) { lista = { t: tipo, itens: [] }; blocosSaida.push(lista); }
+        lista.itens.push({ texto: x.texto });
+      }
+    }
+  }
+  const tabelas = blocosSaida.filter(b => b.t === "tabela" && b.cabecalho).length;
+  return { titulo, blocos: blocosSaida, tabelas };
+}
+</script>
+
+<script id="interface">
+"use strict";
+(function () {
+  const $ = id => document.getElementById(id);
+  const guardar = (k, v) => { try { localStorage.setItem("timbrador." + k, v); } catch (e) { /* sem armazenamento */ } };
+  const guardado = k => { try { return localStorage.getItem("timbrador." + k) || ""; } catch (e) { return ""; } };
+  const msg = (html, classe) => { $("msg").className = "msg " + (classe || ""); $("msg").innerHTML = html; };
+  const escH = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const mostrarLogo = k => {
+    const e = EMPRESAS[k], tem = e && !e.sem_logo && LOGOS[k];
+    $("logo").hidden = !tem;
+    $("logo").alt = e ? e.marca : "";
+    if (tem) $("logo").src = LOGOS[k].uri;
+  };
+  $("empresa").addEventListener("change", () => mostrarLogo($("empresa").value));
+
+  const garantirOpcaoArea = k => { if (![...$("area").options].some(o => o.value === k)) addOpt($("area"), k, `${AREAS[k] || k} (${k})`); };
+  const addOpt = (sel, valor, texto, grupo) => { const o = document.createElement("option"); o.value = valor; o.textContent = texto; (grupo || sel).appendChild(o); };
+  for (const k of ESTADOS_ATIVOS) addOpt($("estado"), k, ESTADOS[k].rotulo);
+
+  /* ------------------------------------------------ marca (marca.json) */
+  // Monta as listas da página a partir do cadastro carregado: empresas, tipos e áreas ativos, logo, cor e rodapé.
+  function aplicarMarca() {
+    const antes = { empresa: $("empresa").value, tipo: $("tipo").value, area: $("area").value || guardado("area") };
+    for (const id of ["empresa", "tipo", "area"]) $(id).innerHTML = "";
+    for (const k of EMPRESAS_ATIVAS) addOpt($("empresa"), k, `${EMPRESAS[k].marca} (${k})`);
+    for (const [rotulo, tipos] of [["Documento curto (ato pontual)", TIPOS_CURTOS], ["Documento longo (consulta)", TIPOS_LONGOS]]) {
+      const ativos = Object.entries(tipos).filter(([k]) => ORG.tipos_ativos.includes(k));
+      if (!ativos.length) continue;
+      const g = document.createElement("optgroup"); g.label = rotulo;
+      for (const [k, v] of ativos) addOpt(null, k, `${v} (${k})`, g);
+      $("tipo").appendChild(g);
+    }
+    for (const k of ORG.areas_ativas) addOpt($("area"), k, `${AREAS[k]} (${k})`);
+    $("empresa").value = EMPRESAS_ATIVAS.includes(antes.empresa) ? antes.empresa : ORG.padrao;
+    if (!$("empresa").value) $("empresa").value = EMPRESAS_ATIVAS[0];
+    if (ORG.tipos_ativos.includes(antes.tipo)) $("tipo").value = antes.tipo;
+    if (antes.area && AREAS[antes.area]) { garantirOpcaoArea(antes.area); $("area").value = antes.area; }
+    mostrarLogo($("empresa").value);
+    const cor = EMPRESAS[ORG.padrao].cor;
+    document.documentElement.style.setProperty("--cor", "#" + cor);
+    $("titulo-pagina").textContent = ORG.organizacao ? `Timbrador · ${ORG.organizacao}` : "Timbrador";
+    document.title = ORG.organizacao ? `Timbrador ${ORG.organizacao}` : "Timbrador";
+    $("rodape-padrao").textContent = [ORG.politica && `Padrão ${ORG.politica}`, ORG.organizacao].filter(Boolean).join(" · ");
+    $("substituido_por").placeholder = `Ex.: ${ORG.padrao}-CI-RH-013/${new Date().getFullYear()}`;
+    const incompletas = EMPRESAS_ATIVAS.filter(k => !cadastroCompleto(EMPRESAS[k]));
+    $("marca-estado").textContent = `${ORG.organizacao || "sem nome de organização"} · ${EMPRESAS_ATIVAS.length} empresa(s)`;
+    $("marca-dica").textContent = (incompletas.length ? `Só minuta ou em aprovação para ${incompletas.join(", ")}: falta razão social ou documento no marca.json. ` : "") +
+      "Para trocar, carregue ou cole outro marca.json.";
+    $("marca-carregar").textContent = "Trocar marca";
+    $("marca-bloco").classList.add("ligada");
+    document.body.classList.remove("sem-marca");
+  }
+  function usarMarca(texto, guardarNoNavegador) {
+    try { carregarMarca(texto); }
+    catch (e) { msg(escH(e.message), "erro"); return false; }
+    if (guardarNoNavegador) guardar("marca", texto);
+    aplicarMarca();
+    $("marca-colar").open = false; $("marca-texto").value = "";
+    atualizarDicas(); mostrarLista();
+    return true;
+  }
+  $("marca-carregar").addEventListener("click", () => $("marca-arquivo").click());
+  $("marca-arquivo").addEventListener("change", async e => {
+    const arq = e.target.files[0]; e.target.value = ""; if (!arq) return;
+    if (usarMarca(await arq.text(), true)) msg(`Marca carregada: ${escH(arq.name)}.`, "ok");
+  });
+  $("marca-usar").addEventListener("click", () => { if (usarMarca($("marca-texto").value, true)) msg("Marca carregada.", "ok"); });
+  // Data de hoje no fuso do computador (valueAsDate usaria UTC e viraria o dia às 21h). Enquanto ninguém
+  // mexer no campo, ele acompanha o dia: página aberta desde ontem gera com a data de hoje.
+  const hojeISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  let dataManual = false;
+  const dataDeHoje = () => { if (!dataManual) $("data_emissao").value = hojeISO(); };
+  $("data_emissao").value = hojeISO();
+  $("data_emissao").addEventListener("input", () => { dataManual = $("data_emissao").value !== hojeISO(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) dataDeHoje(); });
+  window.addEventListener("focus", dataDeHoje);
+  $("elaborado_por").value = guardado("quem");
+  $("area").addEventListener("change", () => guardar("area", $("area").value));
+  $("elaborado_por").addEventListener("input", () => guardar("quem", $("elaborado_por").value.trim()));
+
+  let conteudo = null, anterior = null, original = null;
+  let lista = null, pasta = null, numeroAuto = true;   // lista mestra: dados, pasta conectada (Chrome/Edge) e se o número é sugerido
+  let pastaLista = null, caminhoLista = "";           // onde mora o lista-mestra.json dentro da pasta conectada
+  let lembrada = null;                                // pasta da última vez, esperando um clique para reconfirmar o acesso
+  let mapa = null;                                    // pastas de tipo, Obsoletos e projetos achadas na pasta conectada
+  const nomeEstado = k => ESTADOS[k] ? ESTADOS[k].rotulo : String(k || "?");
+  const codigoDe = f => f.codigo || `${f.empresa}-${f.tipo}-${f.area}-${f.numero ? String(f.numero).padStart(3, "0") : "XXX"}${TIPOS_CURTOS[f.tipo] && f.ano ? "/" + f.ano : ""}`;
+  const refVersao = f => `${codigoDe(f)} v${f.versao}`;
+  const garantirOpcao = (sel, valor, texto) => { if (valor && ![...$(sel).options].some(o => o.value === valor)) addOpt($(sel), valor, texto || valor); };
+  // versão que substitui: a oficial lida agora ou a registrada na ficha de uma minuta de nova versão
+  const substituida = () => !anterior ? null : anterior.estado === "OFICIAL" ? refVersao(anterior) : (anterior.substitui || null);
+
+  /* ------------------------------------------------ modo atualização (documento já timbrado) */
+  function atualizarModo() {
+    $("atualizacao").hidden = !anterior;
+    if (!anterior) { $("bloco-obsoleto-anterior").hidden = true; return; }
+    const e = $("estado").value, obsoletar = e === "OBSOLETO";
+    $("bloco-mudanca").hidden = obsoletar || anterior.estado !== "OFICIAL";
+    $("bloco-oque").hidden = obsoletar;
+    let v = $("versao").value.trim();
+    if (e === "OFICIAL" || obsoletar) v = v.split("-r")[0]; else if (!v.includes("-r")) v += "-r1";
+    $("destino").textContent = obsoletar ? `Este documento (v${v}) sai marcado como obsoleto.` : `Nova versão: v${v} · ${nomeEstado(e)}`;
+    const sub = substituida();
+    $("bloco-obsoleto-anterior").hidden = !(e === "OFICIAL" && sub);
+    $("versao-anterior").textContent = sub || "";
+    $("bloco-original").hidden = !$("obsoletar_anterior").checked;
+    if (!$("bloco-obsoleto-anterior").hidden && $("obsoletar_anterior").checked && !original) buscarOriginal();
+  }
+  /* Arquivo oficial da versão substituída: com a pasta conectada, é procurado pelo nome
+     (CÓDIGO_vVERSÃO_OFICIAL_…): primeiro onde a lista mestra diz que ele está, depois na árvore,
+     fora de Obsoletos e Modelos. Achado, não é preciso enviá-lo, e ele pode ser retirado da pasta depois. */
+  let buscando = false;
+  async function buscarOriginal() {
+    const ref = substituida();
+    if (!pasta || !ref || original || buscando) return;
+    const m = /^(\S+) v(\S+)$/.exec(ref); if (!m) return;
+    const prefixo = `${m[1].replace("/", "-")}_v${m[2]}_OFICIAL_`.toLowerCase();
+    const une = (a, b) => a ? `${a}/${b}` : b;
+    buscando = true;
+    try {
+      const achados = [];
+      const reg = lista && lista.documentos.find(d => d.codigo === m[1] && d.arquivo && d.arquivo.toLowerCase().startsWith(prefixo));
+      if (reg && mapa) {
+        const r = await resolver(reg.pasta && reg.pasta !== "." ? reg.pasta : "");
+        if (r) try { await r.h.getFileHandle(reg.arquivo); achados.push({ dir: r.h, nome: reg.arquivo, caminho: une(r.caminho, reg.arquivo) }); } catch (e) { /* saiu de lá */ }
+      }
+      if (!achados.length) {
+        const andar = async (h, caminho, prof) => {
+          for await (const [nome, f] of h.entries()) {
+            if (f.kind === "file" && nome.toLowerCase().startsWith(prefixo) && nome.toLowerCase().endsWith(".docx")) achados.push({ dir: h, nome, caminho: une(caminho, nome) });
+            else if (f.kind === "directory" && prof > 0 && !nome.startsWith(".") && !["obsoletos", "modelos"].includes(semAcento(nome))) await andar(f, une(caminho, nome), prof - 1);
+          }
+        };
+        await andar(pasta, "", 5);
+      }
+      if (achados.length === 1) await carregarOriginal(await (await achados[0].dir.getFileHandle(achados[0].nome)).getFile(), achados[0]);
+      else if (achados.length > 1) $("original-dica").textContent = `Há ${achados.length} arquivos dessa versão na pasta (${achados.map(a => a.caminho).join("; ")}): envie o certo.`;
+    } catch (e) { /* sem busca: segue pedindo o arquivo */ }
+    buscando = false;
+  }
+  const atualizarDicas = () => {
+    const t = $("tipo").value;
+    $("tipo-dica").textContent = (TIPOS_LONGOS[t]
+      ? "Longo: capa, folha de controle, sumário e páginas no padrão ABNT."
+      : "Curto: texto direto após o título, sem capa.")
+      + (ORG.tipos_ativos.includes(t) ? "" : " Sigla aposentada: serve só para atualizar documento antigo.");
+    const e = $("estado").value;
+    if (!ESTADOS[e]) return;
+    $("estado-dica").textContent = ESTADOS[e].dica
+      + (e === "OFICIAL" || e === "OBSOLETO" ? "" : " O código sai com XXX: o número é reservado na publicação.");
+    document.body.classList.toggle("oficial", e === "OFICIAL");
+    document.body.classList.toggle("obsoleto", e === "OBSOLETO");
+    // Publicar é o único momento em que o número importa: fora dele, lista e campo de número ficam fora do caminho.
+    const publicando = e === "OFICIAL" || e === "OBSOLETO";
+    document.body.classList.toggle("publicando", publicando);
+    // Sair da publicação devolve o número sugerido à lista: minuta não carrega número que ninguém reservou.
+    if (!publicando && numeroAuto && semNumero()) $("numero").value = "";
+    if ((e === "OFICIAL" || e === "OBSOLETO") && !anterior) $("mais").open = true;
+    atualizarModo();
+  };
+  $("tipo").addEventListener("change", atualizarDicas);
+  $("estado").addEventListener("change", () => {
+    if (anterior) $("versao").value = $("estado").value === "OBSOLETO" ? String(anterior.versao) : sugerirAtualizacao(anterior, $("mudanca").value).versao;
+    atualizarDicas();
+    mostrarLista();      // ao escolher oficial, o próximo número livre já aparece no campo
+  });
+  $("mudanca").addEventListener("change", () => { $("versao").value = sugerirAtualizacao(anterior, $("mudanca").value).versao; atualizarModo(); });
+  $("versao").addEventListener("input", atualizarModo);
+  $("obsoletar_anterior").addEventListener("change", atualizarModo);
+  atualizarDicas();
+
+  /* ------------------------------------------------ lista mestra */
+  const temPasta = typeof window.showDirectoryPicker === "function";
+  const specAtual = () => ({ empresa: $("empresa").value, tipo: $("tipo").value, area: $("area").value, ano: +($("data_emissao").value || "").slice(0, 4) || new Date().getFullYear() });
+  // O número só é reservado e registrado quando o documento é publicado. Minuta e em aprovação saem com XXX.
+  const vaiPublicar = () => ["OFICIAL", "OBSOLETO"].includes($("estado").value);
+  // documento ainda sem número: novo, ou minuta/em aprovação lida de um arquivo com código XXX
+  function semNumero() { return !anterior || !anterior.numero; }
+  function mostrarLista() {
+    mostrarDestino();
+    const ligada = !!lista;
+    $("lista-bloco").classList.toggle("ligada", ligada);
+    // Quem já tem a lista à mão continua vendo o bloco, mesmo redigindo uma minuta.
+    document.body.classList.toggle("com-lista", ligada || !!lembrada);
+    $("lista-inventariar").hidden = !pasta;
+    $("lista-conectar").textContent = ligada ? (pasta ? "Trocar pasta" : "Trocar arquivo")
+      : lembrada ? `Reconectar ${lembrada.name}` : (temPasta ? "Conectar pasta" : "Carregar lista-mestra.json");
+    $("numero").placeholder = ligada || !vaiPublicar() ? "XXX" : "conecte a pasta";
+    if (!ligada) {
+      $("lista-estado").textContent = lembrada ? "aguardando liberação" : "sem controle";
+      $("lista-dica").textContent = lembrada
+        ? `A pasta ${lembrada.name} ficou guardada: um clique em Reconectar libera o acesso, sem procurar a pasta de novo.`
+        : temPasta
+          ? "Conecte a pasta dos documentos (uma vez por computador): o Timbrador confere o número, grava o .docx na subpasta do tipo e registra a publicação na lista."
+          : "Este navegador não grava direto na pasta. Carregue o lista-mestra.json: o Timbrador confere o número e devolve a lista atualizada para você substituir.";
+      return;
+    }
+    const s = specAtual(), prox = String(proximoNumero(lista, s)).padStart(3, "0");
+    $("lista-estado").textContent = `${lista.documentos.length} documento(s) registrados`;
+    if (numeroAuto && semNumero() && vaiPublicar()) $("numero").value = proximoNumero(lista, s);
+    if (pasta && !lista.documentos.length) { $("lista-dica").textContent = "Lista vazia: se a pasta já tem documentos, clique em Inventariar para registrar o que existe antes de gerar o próximo."; return; }
+    $("lista-dica").textContent = (pasta ? `Pasta conectada: o .docx é gravado nela e a lista (${caminhoLista}) é atualizada. ` : "Arquivo carregado: a lista atualizada vem junto no download. ") +
+      `Próximo número livre de ${s.empresa}-${s.tipo}-${s.area}: ${prox}.`;
+    if (numeroAuto && semNumero() && vaiPublicar()) $("numero").value = proximoNumero(lista, s);
+  }
+  async function listaDaPasta(dir) {
+    try {
+      const f = await (await dir.getFileHandle(LISTA_ARQUIVO)).getFile();
+      const t = (await f.text()).trim();
+      return listaNormalizar(t ? JSON.parse(t) : null);
+    } catch (e) { if (e.name === "NotFoundError") return listaVazia(); throw e; }
+  }
+  /* A pasta escolhida fica guardada no navegador (IndexedDB). Na volta, o Chrome/Edge pede só uma
+     confirmação de acesso — não é preciso procurar a pasta de novo. Qualquer falha aqui é silenciosa:
+     o pior caso é o comportamento antigo, de escolher a pasta na mão. */
+  const BD = "timbrador", LOJA = "pastas";
+  const abrirBD = () => new Promise((ok, erro) => {
+    const q = indexedDB.open(BD, 1);
+    q.onupgradeneeded = () => q.result.createObjectStore(LOJA);
+    q.onsuccess = () => ok(q.result); q.onerror = () => erro(q.error);
+  });
+  async function guardarPasta(dados) {
+    try {
+      const db = await abrirBD();
+      await new Promise((ok, erro) => {
+        const t = db.transaction(LOJA, "readwrite");
+        t.objectStore(LOJA).put(dados, "ultima");
+        t.oncomplete = ok; t.onerror = () => erro(t.error);
+      });
+    } catch (e) { /* navegador sem armazenamento: segue sem lembrar */ }
+  }
+  async function pastaGuardada() {
+    try {
+      const db = await abrirBD();
+      return await new Promise((ok, erro) => {
+        const t = db.transaction(LOJA, "readonly");
+        const q = t.objectStore(LOJA).get("ultima");
+        q.onsuccess = () => ok(q.result); q.onerror = () => erro(q.error);
+      });
+    } catch (e) { return null; }
+  }
+  async function gravarEm(dir, nome, dados) {
+    const fh = await dir.getFileHandle(nome, { create: true });
+    const w = await fh.createWritable(); await w.write(dados); await w.close();
+  }
+  // procura um lista-mestra.json já existente na árvore (ex.: "programas e aplicativos/timbrador")
+  async function acharListas(dir, prefixo, prof) {
+    const achados = [];
+    for await (const [nome, h] of dir.entries()) {
+      if (h.kind === "file" && nome === LISTA_ARQUIVO) achados.push({ dir, caminho: prefixo || dir.name });
+      else if (h.kind === "directory" && prof > 0 && !nome.startsWith(".")) {
+        achados.push(...await acharListas(h, prefixo ? `${prefixo}/${nome}` : nome, prof - 1));
+      }
+    }
+    return achados;
+  }
+  /* Onde gravar. A pasta conectada pode ser a dos documentos ou uma acima dela (ex.: G:\). As pastas de tipo
+     ("Políticas (POL)"), Obsoletos e as de projeto (dentro de "Projetos") são procuradas até 3 níveis abaixo.
+     A raiz dos documentos é a pasta que reúne mais pastas de tipo; a pasta de tipo que faltar é criada nela. */
+  const juntar = (a, b) => a ? `${a}/${b}` : b;
+  async function mapearPastas() {
+    const tipos = {}, pais = new Map(), projetos = [];
+    let obsoletos = null;
+    const nivel = c => c.split("/").length;
+    async function andar(h, caminho, prof) {
+      for await (const [nome, f] of h.entries()) {
+        if (f.kind !== "directory" || nome.startsWith(".") || nome.startsWith("~$")) continue;
+        const c = juntar(caminho, nome), n = semAcento(nome);
+        if (n === "obsoletos") { if (!obsoletos || nivel(c) < nivel(obsoletos.caminho)) obsoletos = { h: f, caminho: c, pai: caminho }; continue; }
+        if (n === "modelos") continue;
+        if (n === "projetos") {
+          for await (const [n2, g] of f.entries()) if (g.kind === "directory" && !n2.startsWith(".")) projetos.push({ nome: n2, h: g, caminho: juntar(c, n2) });
+          continue;
+        }
+        const sigla = siglaDaPasta(nome);
+        if (sigla) {
+          if (!tipos[sigla] || nivel(c) < nivel(tipos[sigla].caminho)) tipos[sigla] = { h: f, caminho: c };
+          const pai = pais.get(caminho) || { h, caminho, n: 0 }; pai.n++; pais.set(caminho, pai);
+          continue;
+        }
+        if (prof > 1) await andar(f, c, prof - 1);
+      }
+    }
+    await andar(pasta, "", 3);
+    let raiz = { h: pasta, caminho: "" }, mais = 0;
+    for (const v of pais.values()) if (v.n > mais) { mais = v.n; raiz = { h: v.h, caminho: v.caminho }; }
+    // Obsoletos só vale se estiver na raiz dos documentos (política, seção 4.2)
+    if (obsoletos && obsoletos.pai !== raiz.caminho) obsoletos = null;
+    projetos.sort((a, b) => a.nome.localeCompare(b.nome, "pt"));
+    mapa = { raiz, tipos, obsoletos, projetos };
+    preencherDestinos();
+  }
+  // caminho registrado na lista mestra: relativo à raiz dos documentos (como o Inventariar grava)
+  const relativo = c => mapa && mapa.raiz.caminho && c.startsWith(mapa.raiz.caminho + "/") ? c.slice(mapa.raiz.caminho.length + 1) : c;
+  async function resolver(rel) {
+    for (const base of [mapa.raiz, { h: pasta, caminho: "" }]) {
+      try {
+        let h = base.h;
+        for (const parte of rel.split("/").filter(Boolean)) h = await h.getDirectoryHandle(parte);
+        return { h, caminho: juntar(base.caminho, rel) };
+      } catch (e) { /* tenta a outra base */ }
+    }
+    return null;
+  }
+  // provisorio = só para mostrar na tela: não cria nada
+  async function destinoDe(s, obsoleta, provisorio) {
+    if (!mapa) await mapearPastas();
+    if (obsoleta) {
+      if (mapa.obsoletos || provisorio) return mapa.obsoletos || { caminho: juntar(mapa.raiz.caminho, "Obsoletos"), nova: true };
+      const h = await mapa.raiz.h.getDirectoryHandle("Obsoletos", { create: true });
+      return mapa.obsoletos = { h, caminho: juntar(mapa.raiz.caminho, "Obsoletos"), criada: true };
+    }
+    const escolha = $("salvar-em").value;
+    if (escolha) { const p = mapa.projetos.find(x => x.caminho === escolha); if (p) return p; }
+    // nova versão de documento já registrado: fica na pasta da versão vigente, se ela não estiver na raiz
+    const reg = lista && s.codigo && !s.codigo.includes("XXX") && lista.documentos.find(d => d.codigo === s.codigo);
+    if (reg && reg.pasta && reg.pasta !== "." && !/(^|\/)obsoletos$/i.test(reg.pasta)) { const r = await resolver(reg.pasta); if (r) return r; }
+    if (mapa.tipos[s.tipo]) return mapa.tipos[s.tipo];
+    const nome = `${PASTA_DO_TIPO[s.tipo] || s.tipo} (${s.tipo})`, caminho = juntar(mapa.raiz.caminho, nome);
+    if (provisorio) return { caminho, nova: true };
+    const h = await mapa.raiz.h.getDirectoryHandle(nome, { create: true });
+    return mapa.tipos[s.tipo] = { h, caminho, criada: true };
+  }
+  function preencherDestinos() {
+    const sel = $("salvar-em"), atual = sel.value;
+    sel.innerHTML = '<option value="">Pasta do tipo</option>';
+    for (const p of (mapa ? mapa.projetos : [])) addOpt(sel, p.caminho, `Projeto: ${p.nome}`);
+    if ([...sel.options].some(o => o.value === atual)) sel.value = atual;
+    mostrarDestino();
+  }
+  async function mostrarDestino() {
+    $("bloco-salvar").hidden = !(pasta && mapa);
+    if (!pasta || !mapa) return;
+    try {
+      const s = specAtual();
+      if (anterior && anterior.codigo) s.codigo = anterior.codigo;
+      const d = await destinoDe(s, false, true);
+      $("salvar-dica").textContent = `Vai para ${d.caminho || pasta.name}` + (d.nova ? " (a pasta será criada)." : ".") +
+        (mapa.projetos.length && !/(^|\/)Projetos\//i.test(d.caminho || "") ? " Documento de projeto pode ir para a pasta do projeto." : "");
+    } catch (e) { $("salvar-dica").textContent = ""; }
+  }
+  async function usarPasta(dir, avisar) {
+    pasta = dir;
+    let achados = [];
+    try { achados = await acharListas(dir, "", 4); } catch (e) { achados = []; }   // navegador sem varredura: usa a própria pasta
+    if (achados.length > 1) {
+      pasta = null; lista = null; pastaLista = null;
+      throw new Error("Há mais de um lista-mestra.json aqui dentro (" + achados.map(a => a.caminho).join(", ") +
+        "). Conecte a pasta onde está a lista que vale, ou apague as outras.");
+    }
+    pastaLista = achados.length ? achados[0].dir : dir;
+    caminhoLista = achados.length ? achados[0].caminho : dir.name;
+    lista = await listaDaPasta(pastaLista);
+    lembrada = null;
+    mapa = null;
+    try { await mapearPastas(); } catch (e) { mapa = null; }
+    if (anterior) atualizarModo();      // com a pasta, a versão substituída pode ser achada sozinha
+    await guardarPasta({ raiz: dir, nome: dir.name });
+    if (avisar !== false) msg(`Lista mestra conectada: ${escH(lista.documentos.length)} documento(s), lista em ${escH(caminhoLista)}.`, "ok");
+    mostrarLista();
+  }
+  async function conectarLista() {
+    try {
+      if (!temPasta) { $("lista-arquivo").click(); return; }
+      if (lembrada) {                       // pasta lembrada: só reconfirmar o acesso, sem procurar de novo
+        const ok = await lembrada.requestPermission({ mode: "readwrite" });
+        if (ok === "granted") return await usarPasta(lembrada, true);
+        lembrada = null; mostrarLista();
+      }
+      const dir = await window.showDirectoryPicker({ id: "timbrador", mode: "readwrite" });
+      if (dir.requestPermission && (await dir.requestPermission({ mode: "readwrite" })) !== "granted")
+        throw new Error("Sem permissão de gravação na pasta escolhida.");
+      await usarPasta(dir, true);
+    } catch (e) { if (e.name !== "AbortError") msg(escH(e.message), "erro"); mostrarLista(); }
+  }
+  // na abertura: se a pasta da última vez ainda estiver autorizada, reconecta sozinha
+  (async () => {
+    if (!temPasta) return;
+    const g = await pastaGuardada();
+    if (!g || !g.raiz || typeof g.raiz.queryPermission !== "function") return;
+    try {
+      const p = await g.raiz.queryPermission({ mode: "readwrite" });
+      if (p === "granted") await usarPasta(g.raiz, false);
+      else if (p === "prompt") { lembrada = g.raiz; mostrarLista(); }
+    } catch (e) { /* pasta sumiu ou mudou de lugar: fica como estava */ }
+  })();
+  $("lista-conectar").addEventListener("click", conectarLista);
+  ["tipo", "empresa", "area", "estado", "salvar-em"].forEach(id => $(id).addEventListener("change", () => mostrarDestino()));
+  $("lista-inventariar").addEventListener("click", async () => {
+    if (!pasta) return;
+    $("lista-inventariar").disabled = $("lista-conectar").disabled = $("gerar").disabled = true;
+    msg("Lendo os documentos da pasta…");
+    try {
+      lista = await listaDaPasta(pastaLista);
+      const { lista: nova, relatorio: r } = await inventariar(pasta, lista, (n, nome) => msg(`Lendo ${n}: ${escH(nome)}…`));
+      lista = nova;
+      await gravarEm(pastaLista, LISTA_ARQUIVO, listaTexto(lista));
+      const conta = d => Object.entries(d).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${escH(k)} ${v}`).join(" · ") || "nenhum";
+      const itens = [`Origem dos dados: ${conta(r.porOrigem)}.`, `Por tipo: ${conta(r.porTipo)}.`, `Por estado: ${conta(r.porEstado)}.`];
+      if (r.varias.length) itens.push(`${r.varias.length} documento(s) com mais de um arquivo na pasta: ficou a versão mais alta.`);
+      for (const [codigo, titulos] of r.conflitos) itens.push(`<strong>Número repetido:</strong> ${escH(codigo)} aparece com títulos diferentes — ${titulos.map(escH).join(" | ")}.`);
+      for (const v of r.versoesRuins) itens.push(`<strong>Versão fora do padrão</strong> (deveria ser X.Y ou X.Y-rN): ${escH(v)}.`);
+      if (r.semNumero.length) itens.push(`${r.semNumero.length} arquivo(s) sem número (código com XXX): ${r.semNumero.slice(0, 6).map(escH).join("; ")}${r.semNumero.length > 6 ? "…" : ""}.`);
+      for (const [nome, motivo] of r.semId.slice(0, 10)) itens.push(`Fora da lista: ${escH(nome)} — ${escH(motivo)}.`);
+      if (r.ignorados.length) itens.push(`${r.ignorados.length} arquivo(s) que não são .docx foram ignorados.`);
+      if (r.modelos && r.modelos.length) itens.push(`${r.modelos.length} arquivo(s) de partida de modelo foram pulados (não são documentos).`);
+      if (Object.keys(r.porOrigem).some(o => o !== "ficha")) itens.push("Documentos lidos do cabeçalho ou do nome do arquivo podem ter título e responsável incompletos: confira na lista.");
+      msg(`Inventário pronto: ${r.docx} arquivo(s) .docx, ${r.documentos} documento(s) na lista mestra.<ul>` +
+        itens.map(x => `<li>${x}</li>`).join("") + "</ul>", "ok");
+    } catch (e) { msg("Não consegui inventariar a pasta: " + escH(e.message), "erro"); }
+    $("lista-inventariar").disabled = $("lista-conectar").disabled = false;
+    $("gerar").disabled = !conteudo;
+    mostrarLista();
+  });
+  $("lista-arquivo").addEventListener("change", async e => {
+    const arq = e.target.files[0]; if (!arq) return;
+    try {
+      const t = (await arq.text()).trim();
+      lista = listaNormalizar(t ? JSON.parse(t) : null); pasta = null;
+      msg(`Lista mestra carregada: ${lista.documentos.length} documento(s).`, "ok");
+    } catch (err) { lista = null; msg("Não consegui ler o lista-mestra.json: " + escH(err.message), "erro"); }
+    mostrarLista();
+  });
+  ["empresa", "tipo", "area", "data_emissao"].forEach(id => $(id).addEventListener("change", mostrarLista));
+  $("numero").addEventListener("input", () => { numeroAuto = false; });
+  mostrarLista();
+
+  const paraData = d => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(d || ""); return m ? `${m[3]}-${m[2]}-${m[1]}` : ""; };
+  function resetOriginal() {
+    original = null; $("arquivo-original").value = "";
+    $("soltar-original").classList.remove("cheio");
+    $("original-titulo").textContent = "Arquivo oficial da versão substituída";
+    $("original-dica").textContent = "O .docx original, sem as alterações desta nova versão";
+    $("bloco-retirar").hidden = true;
+  }
+  // Arquivo de partida de modelo oficial: vira documento novo. Vale o tipo e o corpo; código, versão,
+  // título e responsáveis eram do modelo e não passam adiante.
+  function usarModelo(c) {
+    const f = c.ficha;
+    if (EMPRESAS[f.empresa]) { garantirOpcao("empresa", f.empresa, `${EMPRESAS[f.empresa].marca} (${f.empresa})`); $("empresa").value = f.empresa; mostrarLogo(f.empresa); }
+    if (TIPOS_CURTOS[f.tipo] || TIPOS_LONGOS[f.tipo]) { garantirOpcao("tipo", f.tipo, `${TIPOS_CURTOS[f.tipo] || TIPOS_LONGOS[f.tipo]} (${f.tipo})`); $("tipo").value = f.tipo; }
+    if (f.area) { garantirOpcao("area", f.area, `${AREAS[f.area] || f.area} (${f.area})`); $("area").value = f.area; }
+    $("titulo").value = ""; $("versao").value = "1.0"; $("numero").value = ""; numeroAuto = true;
+    $("estado").value = "MINUTA";
+    c.blocos = c.blocos.filter(b => !(b.t === "nota" && b.rotulo === "Como usar"));
+    delete c.ficha;
+    (c.avisos = c.avisos || []).unshift("Arquivo de partida do modelo oficial: tratado como documento novo. Dê o título e substitua os colchetes; o código sai com XXX.");
+    atualizarDicas();
+  }
+  function preencher(f) {
+    if (f.empresa in EMPRESAS) {
+      garantirOpcao("empresa", f.empresa, `${EMPRESAS[f.empresa].marca} (${f.empresa})`);
+      $("empresa").value = f.empresa; mostrarLogo(f.empresa);
+    }
+    if (TIPOS_CURTOS[f.tipo] || TIPOS_LONGOS[f.tipo]) {
+      garantirOpcao("tipo", f.tipo, `${TIPOS_CURTOS[f.tipo] || TIPOS_LONGOS[f.tipo]} (${f.tipo})`);
+      $("tipo").value = f.tipo;
+    }
+    if (f.area) { garantirOpcao("area", f.area, `${AREAS[f.area] || f.area_nome || f.area} (${f.area})`); $("area").value = f.area; }
+    $("numero").value = f.numero || "";
+    if (f.titulo) $("titulo").value = f.titulo;
+    $("elaborado_por").value = f.elaborado_por || "";
+    if (f.classificacao) { garantirOpcao("classificacao", f.classificacao); $("classificacao").value = f.classificacao; }
+    dataManual = false; dataDeHoje();
+    $("aprovado_por").value = ""; $("data_aprovacao").value = ""; $("substituido_por").value = ""; $("motivo_obsoleto").value = "";
+    $("mudanca").value = "conteudo"; $("o_que_mudou").value = "";
+    const sug = sugerirAtualizacao(f, "conteudo");
+    $("estado").value = sug.estado; $("versao").value = sug.versao;
+    numeroAuto = !f.numero;      // minuta sem número: ao publicar, o Timbrador sugere o próximo livre
+    $("detectado").innerHTML = `<strong>Documento timbrado reconhecido:</strong> ${escH(refVersao(f))} · ${escH(nomeEstado(f.estado))}<br>` +
+      `<span>Empresa, tipo, número, título e responsáveis foram preenchidos. O arquivo será tratado como atualização.</span>`;
+    resetOriginal();
+  }
+
+  async function carregar(arquivo) {
+    if (!arquivo) return;
+    const ext = arquivo.name.toLowerCase().split(".").pop();
+    // marca.json solto na página (ou escolhido no lugar do documento): troca a marca
+    if (ext === "json") { if (usarMarca(await arquivo.text(), true)) msg(`Marca carregada: ${escH(arquivo.name)}.`, "ok"); return; }
+    if (!MARCA_CARREGADA) return msg("Carregue primeiro o marca.json da organização.", "erro");
+    conteudo = null; anterior = null; $("gerar").disabled = true; msg("Lendo o arquivo…");
+    try {
+      let lido;
+      if (ext === "docx") lido = await lerDocx(await arquivo.arrayBuffer());
+      else if (ext === "txt" || ext === "md") lido = lerTexto(await arquivo.text(), ext === "md");
+      else throw new Error("Formato não aceito. Use .docx, .txt ou .md (arquivos .doc antigos: abra no Word e salve como .docx).");
+      if (lido.ficha && lido.ficha.estado === "OBSOLETO")
+        throw new Error(`Este documento está obsoleto${lido.ficha.substituido_por ? ` (substituído por ${lido.ficha.substituido_por})` : ""}. Para atualizar, envie a versão vigente.`);
+      if (!lido.blocos.length) throw new Error(ext === "docx"
+        ? "Não encontrei texto no corpo deste .docx. Costuma acontecer quando o conteúdo está só em imagem, em caixas de texto que o Word não expõe, ou quando o arquivo é um .doc antigo renomeado: abra no Word, use Arquivo > Salvar como > Documento do Word (.docx) e envie de novo. Se o texto for imagem (digitalização), copie o texto para um .txt."
+        : "Não encontrei texto no arquivo: ele está vazio ou só tem espaços.");
+      conteudo = lido;
+      { const ex = extrairAssinaturas(conteudo.blocos, conteudo.ficha); conteudo.blocos = ex.blocos; usarEnvolvidos(ex.envolvidos, ex.com);
+        if (conteudo.ficha && conteudo.ficha.assinatura_formato) $("assinatura_formato").value = conteudo.ficha.assinatura_formato; else $("assinatura_formato").value = "auto"; }
+      $("titulo").value = conteudo.titulo || (arquivo.colado ? "" : arquivo.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " "));
+      if (arquivo.colado && !conteudo.titulo) { $("mais").open = true; (conteudo.avisos = conteudo.avisos || []).push("Texto colado sem título: informe o título em Mais opções."); }
+      if (conteudo.ficha && conteudo.ficha.modelo) usarModelo(conteudo);
+      else if (conteudo.ficha) { anterior = conteudo.ficha; preencher(anterior); }
+      else if (/-r\d+$|^\d+\.\d+$/.test($("versao").value) && $("versao").value !== "1.0") $("versao").value = "1.0";
+      $("soltar").classList.add("cheio");
+      $("soltar-titulo").textContent = arquivo.colado ? `Texto colado (${conteudo.blocos.length} bloco${conteudo.blocos.length === 1 ? "" : "s"})` : arquivo.name;
+      $("soltar-dica").textContent = "Clique, solte outro arquivo ou cole outro texto para trocar";
+      $("gerar").disabled = false;
+      msg((conteudo.avisos || []).length ? "<ul>" + conteudo.avisos.map(x => `<li>${escH(x)}</li>`).join("") + "</ul>" : "");
+    } catch (e) {
+      $("soltar").classList.remove("cheio"); $("soltar-titulo").textContent = "Clique ou arraste o arquivo aqui";
+      $("soltar-dica").textContent = "Word (.docx), texto (.txt) ou Markdown (.md). Pode soltar em qualquer lugar da tela ou colar com Ctrl+V.";
+      msg(escH(e.message), "erro");
+    }
+    atualizarDicas(); mostrarLista();
+  }
+  async function carregarOriginal(arquivo, onde) {
+    if (!arquivo) return;
+    resetOriginal();
+    try {
+      if (!/\.docx$/i.test(arquivo.name)) throw new Error("Envie o .docx original da versão substituída.");
+      const c = await lerDocx(await arquivo.arrayBuffer());
+      if (!c.ficha) throw new Error("Esse arquivo não é um documento timbrado.");
+      if (c.ficha.estado !== "OFICIAL") throw new Error(`O arquivo da versão substituída precisa ser o oficial (este está como ${nomeEstado(c.ficha.estado)}).`);
+      const esperado = substituida(), achado = refVersao(c.ficha);
+      if (esperado && achado.replace(/\s+/g, " ") !== esperado.replace(/\s+/g, " ")) throw new Error(`Esse arquivo é ${achado}, mas a versão substituída é ${esperado}.`);
+      original = c; original.nome = arquivo.name; original.onde = (onde && onde.dir) ? onde : null;
+      $("soltar-original").classList.add("cheio"); $("soltar-original").classList.remove("campo-erro");
+      $("original-titulo").textContent = arquivo.name;
+      $("original-dica").textContent = original.onde ? `${achado} · Oficial · encontrado na pasta: ${original.onde.caminho} · clique para trocar` : `${achado} · Oficial · clique para trocar`;
+      $("bloco-retirar").hidden = !original.onde;
+      if (!original.onde) msg("");
+    } catch (e) { msg(escH(e.message), "erro"); }
+  }
+
+  const ligarZona = (zona, input, fn) => {
+    zona.addEventListener("click", () => input.click());
+    zona.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } });
+    input.addEventListener("change", e => fn(e.target.files[0]));
+    if (zona.id === "soltar") return;     // a zona principal é a tela inteira (abaixo)
+    zona.addEventListener("dragover", e => { e.preventDefault(); zona.classList.add("ativo"); });
+    zona.addEventListener("dragleave", () => zona.classList.remove("ativo"));
+    zona.addEventListener("drop", e => { e.preventDefault(); zona.classList.remove("ativo"); fn(e.dataTransfer.files[0]); });
+  };
+  ligarZona($("soltar"), $("arquivo"), carregar);
+  ligarZona($("soltar-original"), $("arquivo-original"), carregarOriginal);
+  // a tela inteira recebe o arquivo; só a caixa da versão substituída tem destino próprio
+  let arrasto = 0;
+  const temArquivo = e => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+  document.addEventListener("dragenter", e => { if (!temArquivo(e)) return; arrasto++; document.body.classList.add("arrastando"); });
+  document.addEventListener("dragleave", () => { if (--arrasto <= 0) { arrasto = 0; document.body.classList.remove("arrastando"); } });
+  document.addEventListener("dragover", e => { if (temArquivo(e)) e.preventDefault(); });
+  document.addEventListener("drop", e => {
+    if (!temArquivo(e)) return;
+    e.preventDefault(); arrasto = 0; document.body.classList.remove("arrastando");
+    if (e.target.closest && e.target.closest("#soltar-original")) return;   // tratado pela própria caixa
+    carregar(e.dataTransfer.files[0]);
+  });
+  // ---------------------------------------------------------------- assinaturas
+  function addEnvolvido(a = {}) {
+    const d = document.createElement("div"); d.className = "envolvido";
+    d.innerHTML = '<input type="text" class="env-nome" placeholder="Nome"><input type="text" class="env-cargo" placeholder="Cargo"><input type="text" class="env-papel" list="papeis" placeholder="Papel"><button type="button" title="Retirar">×</button>';
+    d.querySelector(".env-nome").value = a.nome || ""; d.querySelector(".env-cargo").value = a.cargo || ""; d.querySelector(".env-papel").value = a.papel || "";
+    d.querySelector("button").addEventListener("click", () => { d.remove(); if (!$("envolvidos").children.length) addEnvolvido(); });
+    $("envolvidos").appendChild(d);
+    return d;
+  }
+  const lerEnvolvidos = () => [...$("envolvidos").children].map(d => ({ nome: d.querySelector(".env-nome").value.trim(), cargo: d.querySelector(".env-cargo").value.trim(), papel: d.querySelector(".env-papel").value.trim() })).filter(a => a.nome);
+  function usarEnvolvidos(lista, com) {
+    $("envolvidos").innerHTML = "";
+    (lista && lista.length ? lista : [{}]).forEach(addEnvolvido);
+    $("com_assinatura").checked = !!com; $("bloco-envolvidos").hidden = !com;
+  }
+  $("com_assinatura").addEventListener("change", () => {
+    $("bloco-envolvidos").hidden = !$("com_assinatura").checked;
+    if ($("com_assinatura").checked && !$("envolvidos").children.length) addEnvolvido().querySelector(".env-nome").focus();
+  });
+  $("add-envolvido").addEventListener("click", () => addEnvolvido().querySelector(".env-nome").focus());
+  usarEnvolvidos([], false);
+
+  // marca da última vez, guardada neste navegador
+  { const m = guardado("marca"); if (m) { try { carregarMarca(m); aplicarMarca(); atualizarDicas(); mostrarLista(); } catch (e) { msg("A marca guardada neste navegador não vale mais: " + escH(e.message) + " Carregue o marca.json de novo.", "erro"); } } }
+
+  // texto colado: pela caixa "Ou cole o texto aqui" ou com Ctrl+V em qualquer parte da página fora dos campos
+  function carregarTexto(texto) {
+    if (!texto || !texto.trim()) return msg("Não há texto para usar.", "erro");
+    const f = new File([texto], "Texto colado.md", { type: "text/markdown" });
+    f.colado = true;
+    carregar(f);
+  }
+  $("usar-texto").addEventListener("click", () => carregarTexto($("texto-colado").value));
+  document.addEventListener("paste", e => {
+    const alvo = document.activeElement;
+    if (alvo && (alvo.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(alvo.tagName))) return;
+    const dt = e.clipboardData; if (!dt) return;
+    if (dt.files && dt.files.length) { e.preventDefault(); return carregar(dt.files[0]); }
+    const t = dt.getData("text/plain");
+    if (t && !MARCA_CARREGADA && t.trim().startsWith("{")) { e.preventDefault(); if (usarMarca(t, true)) msg("Marca carregada.", "ok"); return; }
+    if (t && t.trim()) { e.preventDefault(); $("texto-colado").value = t; carregarTexto(t); }
+  });
+
+  const data = id => { const v = $(id).value; if (!v) return ""; const [a, m, d] = v.split("-"); return `${d}/${m}/${a}`; };
+  const baixar = (blob, nome, atraso) => {
+    const url = URL.createObjectURL(blob);
+    setTimeout(() => { const a = document.createElement("a"); a.href = url; a.download = nome; document.body.appendChild(a); a.click(); a.remove(); }, atraso);
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+    return `<a href="${url}" download="${escH(nome)}">${escH(nome)}</a>`;
+  };
+  const mostrarErros = erros => {
+    erros.forEach(e => $(e.campo) && $(e.campo).classList.add("campo-erro"));
+    if (erros.some(e => ["numero", "versao", "titulo"].includes(e.campo))) $("mais").open = true;
+    const el = $(erros[0].campo); if (el) el.focus();
+    msg("Não foi possível gerar:<ul>" + erros.map(e => `<li>${escH(e.msg)}</li>`).join("") + "</ul>", "erro");
+  };
+
+  $("gerar").addEventListener("click", async () => {
+    document.querySelectorAll(".campo-erro").forEach(el => el.classList.remove("campo-erro"));
+    // relê a lista antes de conferir: outra pessoa pode ter reservado um número enquanto esta página estava aberta
+    if (pastaLista) { try { lista = await listaDaPasta(pastaLista); mostrarLista(); } catch (e) { return msg("Não consegui ler a lista mestra na pasta: " + escH(e.message), "erro"); } }
+    dataDeHoje();
+    const estado = $("estado").value, obsoletar = !!anterior && estado === "OBSOLETO";
+    let spec;
+    const antes = [];
+    if (obsoletar) {
+      spec = JSON.parse(JSON.stringify(anterior));
+      delete spec.codigo;
+      Object.assign(spec, { estado, substituido_por: $("substituido_por").value.trim(), motivo_obsoleto: $("motivo_obsoleto").value.trim() });
+    } else {
+      spec = anterior ? JSON.parse(JSON.stringify(anterior)) : {};
+      if (anterior) {
+        ["codigo", "vigencia", "aprovado_por", "data_aprovacao", "cargo_aprovador", "substituido_por", "motivo_obsoleto"].forEach(k => delete spec[k]);
+        if (anterior.estado === "OFICIAL") spec.substitui = refVersao(anterior);
+        if (spec.area !== $("area").value) delete spec.area_nome;
+      }
+      Object.assign(spec, {
+        empresa: $("empresa").value, tipo: $("tipo").value, estado, area: $("area").value, numero: $("numero").value,
+        versao: $("versao").value, titulo: $("titulo").value.trim(), data_emissao: data("data_emissao"),
+        elaborado_por: $("elaborado_por").value.trim(), classificacao: $("classificacao").value,
+        aprovado_por: $("aprovado_por").value.trim(), data_aprovacao: data("data_aprovacao"),
+        com_assinatura: $("com_assinatura").checked, envolvidos: $("com_assinatura").checked ? lerEnvolvidos() : [],
+        assinatura_formato: $("assinatura_formato").value
+      });
+      if (estado === "OBSOLETO") Object.assign(spec, { substituido_por: $("substituido_por").value.trim(), motivo_obsoleto: $("motivo_obsoleto").value.trim() });
+      if (!spec.com_assinatura) { delete spec.envolvidos; delete spec.assinatura_formato; }
+      if (anterior) {
+        const oq = $("o_que_mudou").value.trim();
+        if (!oq) antes.push({ campo: "o_que_mudou", msg: "Descreva o que mudou nesta versão: vai para o histórico de revisões." });
+        let v = spec.versao.trim();
+        if (estado === "OFICIAL") v = v.split("-r")[0]; else if (!v.includes("-r")) v += "-r1";
+        spec.historico = historicoAtualizado(anterior, v, oq, spec.elaborado_por, spec.data_emissao);
+      }
+    }
+    const querObsoleta = !obsoletar && estado === "OFICIAL" && !!substituida() && $("obsoletar_anterior").checked;
+    if (querObsoleta && !original) antes.push({ campo: "soltar-original", msg: "Envie o arquivo oficial da versão substituída para marcá-la como obsoleta, ou desmarque essa opção." });
+    if (!obsoletar && spec.com_assinatura && !spec.envolvidos.length) antes.push({ campo: "envolvidos", msg: "Com assinatura: informe ao menos um envolvido (nome)." });
+    if (lista && vaiPublicar() && !spec.elaborado_por && !obsoletar) antes.push({ campo: "elaborado_por", msg: "Informe quem responde por esta publicação (em Mais opções): vai para a lista mestra." });
+    const { erros, avisos } = validar(spec);
+    // validar() tira do título o nome do tipo, como o gerador: a página mostra o título que vai sair
+    if (!obsoletar && spec.titulo && spec.titulo !== $("titulo").value.trim()) $("titulo").value = spec.titulo;
+    const atualizacao = !!anterior && (obsoletar || anterior.codigo === spec.codigo);
+    const conf = conferirLista(lista, spec, atualizacao);
+    const todos = antes.concat(erros, conf.erros);
+    if (todos.length) return mostrarErros(todos);
+    // local e data de assinatura: a data é a deste documento, não a da versão anterior nem a do texto de origem
+    const comData = bl => bl.map(b => b.t === "local_data" ? { ...b, data: spec.data_emissao } : b);
+    // assinaturas: no automático, linhas; se elas ficariam sozinhas numa página, tabela
+    let corpoFinal = montarAssinaturas(comData(conteudo.blocos), spec, spec.assinatura_formato === "tabela" ? "tabela" : "linhas");
+    const autoTabela = spec.com_assinatura && spec.assinatura_formato !== "linhas" && spec.assinatura_formato !== "tabela" && assinaturasSozinhas(spec, corpoFinal);
+    if (autoTabela) corpoFinal = montarAssinaturas(corpoFinal, spec, "tabela");
+    const blob = gerarDocx(spec, corpoFinal);
+    const nome = nomeArquivo(spec);
+    const extras = [...avisos, ...conf.avisos, ...(conteudo.avisos || []), ...blob.avisos];
+    if (autoTabela) extras.push("As linhas de assinatura ficariam sozinhas na última página: as assinaturas saíram em tabela. Para outro formato, escolha em Formato das assinaturas.");
+    const feitos = [[spec, nome, blob]];
+    if (querObsoleta) {
+      const velha = obsoletoDaAnterior(original.ficha, spec);
+      const r = validar(velha);
+      if (r.erros.length) extras.push("A versão substituída não pôde ser marcada como obsoleta: " + r.erros.map(e => e.msg).join(" "));
+      else {
+        const nomeV = nomeArquivo(velha);
+        // a cópia obsoleta mantém as assinaturas da versão substituída, no mesmo formato
+        let corpoV = original.blocos;
+        if (velha.com_assinatura && (velha.envolvidos || []).length) {
+          corpoV = montarAssinaturas(extrairAssinaturas(original.blocos, original.ficha).blocos, velha, velha.assinatura_formato === "tabela" ? "tabela" : "linhas");
+          if (velha.assinatura_formato !== "linhas" && velha.assinatura_formato !== "tabela" && assinaturasSozinhas(velha, corpoV)) corpoV = montarAssinaturas(corpoV, velha, "tabela");
+        }
+        feitos.push([velha, nomeV, gerarDocx(velha, corpoV)]);
+        if (!(pasta && original.onde && $("retirar_original").checked))
+          extras.push(pasta ? `Retire de uso o arquivo oficial anterior${original.nome ? ` (${original.nome})` : ""}: a cópia obsoleta foi para a pasta Obsoletos.`
+            : `Guarde ${nomeV} na pasta Obsoletos, na raiz dos documentos, e retire de uso o arquivo oficial anterior.`);
+      }
+    }
+    let saida = "";
+    if (pasta) {
+      try {
+        const destinos = [];
+        for (const [s, n, b] of feitos) {
+          const copia = s !== spec;                      // cópia obsoleta da versão substituída
+          const onde = await destinoDe(s, s.estado === "OBSOLETO");
+          await gravarEm(onde.h, n, b);
+          destinos.push(juntar(onde.caminho, n));
+          if (onde.criada) { extras.push(`Criei a pasta ${onde.caminho}.`); onde.criada = false; }
+          // a cópia obsoleta da versão substituída não entra na lista: a entrada do código aponta a vigente
+          // obsoleto substituído por nova versão do mesmo código: a entrada continua apontando a vigente
+          const mesmoCodigo = s.estado === "OBSOLETO" && String(s.substituido_por || "").split(" v")[0].trim() === s.codigo;
+          if (vaiPublicar() && !copia && !mesmoCodigo) { const reg = registroDe(s, n); reg.pasta = relativo(onde.caminho) || "."; lista = mesclarLista(lista, reg); }
+        }
+        if (vaiPublicar()) await gravarEm(pastaLista, LISTA_ARQUIVO, listaTexto(lista));
+        saida = `Gravado em: ${destinos.map(escH).join(" e ")}`;
+        // só retira o oficial anterior depois que a cópia obsoleta foi gravada
+        if (feitos.length > 1 && original && original.onde && $("retirar_original").checked) {
+          try { await original.onde.dir.removeEntry(original.onde.nome); extras.push(`Retirei ${original.onde.caminho} da pasta: a versão anterior agora está só em Obsoletos, marcada como obsoleta.`); }
+          catch (e) { extras.push(`Não consegui retirar ${original.onde.caminho} (${e.message}): retire-o à mão.`); }
+          resetOriginal();
+        }
+        mostrarDestino();
+        mostrarLista();
+      } catch (e) {
+        extras.push("Não consegui gravar na pasta (" + e.message + "): os arquivos foram baixados; mova-os e atualize a lista à mão.");
+        pasta = null; mostrarLista();
+      }
+    }
+    if (!saida) {
+      const links = feitos.map(([s, n, b], i) => baixar(b, n, i * 800));
+      if (lista && vaiPublicar()) {
+        for (const [s, n] of feitos) lista = mesclarLista(lista, registroDe(s, n));
+        links.push(baixar(new Blob([listaTexto(lista)], { type: "application/json" }), LISTA_ARQUIVO, feitos.length * 800));
+        extras.push(`Substitua o ${LISTA_ARQUIVO} da pasta pelo que acabou de baixar, senão o próximo número sai errado.`);
+        mostrarLista();
+      }
+      saida = "Pronto: " + links.join(" e ");
+    }
+    numeroAuto = true;
+    if (!lista && (estado === "OFICIAL" || estado === "OBSOLETO"))
+      extras.push("Publicação NÃO registrada na lista mestra: a pasta não está conectada. Conecte a pasta e gere de novo, ou anote o documento na lista à mão.");
+    if (conteudo.tabelas) extras.push("As tabelas saíram com legenda sem título e com a fonte padrão: complete no Word (título acima, fonte abaixo).");
+    if (blob.temSumario) extras.push("Ao abrir, o Word pergunta se deseja atualizar os campos: responda Sim para numerar o sumário.");
+    msg(saida + (extras.length ? "<ul>" + extras.map(x => `<li>${escH(x)}</li>`).join("") + "</ul>" : ""), "ok");
+  });
+})();
+</script>
+</body>
+</html>
