@@ -70,11 +70,11 @@ números de página" reaparecer, alguma das duas sumiu do PATH.
 
 Esta máquina é o homeserver. `docker compose up -d` (na raiz) sobe o container
 `timbrador` (nginx:alpine, `restart: unless-stopped`) servindo `pagina/` em
-**127.0.0.1:8090**, com CSP que proíbe a página de falar com a rede
+**127.0.0.1:8091**, com CSP que proíbe a página de falar com a rede
 (`deploy/nginx.conf`). O volume é a própria pasta `pagina/` do checkout: o que
 estiver no branch atual é o que está no ar. O acesso de fora é por um hostname
 público do túnel Cloudflare (configurado no painel, token no serviço
-`cloudflared`) apontando para `http://localhost:8090`; o HTTPS do túnel é o que
+`cloudflared`) apontando para `http://localhost:8091`; o HTTPS do túnel é o que
 deixa a página gravar direto na pasta dos documentos.
 
 ## Invariantes
