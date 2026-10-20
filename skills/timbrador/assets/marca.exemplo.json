@@ -1,5 +1,5 @@
 {
-  "_instrucoes": "Copie este arquivo como marca.json e preencha. 'logo' aceita caminho (relativo a este arquivo) de PNG/JPEG ou data URI; use --embutir-logos para gerar uma versão de arquivo único. Empresa com razao_social ou documento em [definir] só emite RASCUNHO, MINUTA ou EM_REVISAO.",
+  "_instrucoes": "Copie este arquivo como marca.json e preencha. 'logo' aceita caminho (relativo a este arquivo) de PNG/JPEG ou data URI; use --embutir-logos para gerar uma versão de arquivo único. Empresa com razao_social ou documento em [definir] só emite MINUTA ou EM_APROVACAO. Opcionais por empresa: \"grupo\": true (documento do grupo: sem documento, rodapé com as logos das empresas ativas) e \"ativa\": false (empresa aposentada, só para versionar documento antigo). Opcionais na raiz: areas, areas_extra, areas_ativas, tipos_extra, tipos_ativos.",
   "organizacao": "Sua Organização",
   "empresa_padrao": "SUA",
   "politica": {
