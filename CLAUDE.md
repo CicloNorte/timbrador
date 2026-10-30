@@ -70,12 +70,23 @@ números de página" reaparecer, alguma das duas sumiu do PATH.
 
 Esta máquina é o homeserver. `docker compose up -d` (na raiz) sobe o container
 `timbrador` (nginx:alpine, `restart: unless-stopped`) servindo `pagina/` em
-**127.0.0.1:8091**, com CSP que proíbe a página de falar com a rede
+**127.0.0.1:8091**, com CSP que só deixa a página ler arquivos do próprio site
 (`deploy/nginx.conf`). O volume é a própria pasta `pagina/` do checkout: o que
 estiver no branch atual é o que está no ar. O acesso de fora é por um hostname
 público do túnel Cloudflare (configurado no painel, token no serviço
 `cloudflared`) apontando para `http://localhost:8091`; o HTTPS do túnel é o que
 deixa a página gravar direto na pasta dos documentos.
+
+**Marca padrão do site: mhdn** (30/10/2026). `pagina/marca.json` (fora do git,
+`.gitignore`) é a marca da mhdn, montada a partir do brandbook
+(claude.ai/artifact/RSANaxBgb5bQ7Rquwgbezz): logo `mhdn-horizontal-anil`
+rasterizado em PNG com resvg (o renderizador do ImageMagick desenha o M errado),
+cor `anil` #233F61, CPF, Rio Claro, política `MHDN-POL-ADM-001`, todas as áreas e
+tipos. A página busca esse arquivo ao abrir e o usa enquanto o navegador não
+guardou uma marca própria (Editar/Importar guardam; "Usar a do site" volta). A
+mesma cópia está em `skills/timbrador/assets/marca.json` (também fora do git),
+que o gerador acha sozinho. **O `marca.json` do site é público** (tem o CPF):
+sem Cloudflare Access no hostname, qualquer um o baixa.
 
 ## Invariantes
 
@@ -133,8 +144,9 @@ PowerShell 7.4 no Linux contra `gerar_documento.py --inventariar`: lista mestra
 igual (ficha nova e antiga, cabeçalho, nome, Obsoletos pulado). Os `.cmd` estão
 em CRLF (`.gitattributes`).
 
-**Pendente:** a página não foi aberta num navegador real (testada em jsdom e
-conferida em PDF), e o `.ps1` não rodou no Windows PowerShell 5.1.
+**Pendente:** no Chrome real só foram vistos a carga da marca e o editor (sem
+erro de console); falta gerar um documento e conectar a pasta por lá. O `.ps1`
+não rodou no Windows PowerShell 5.1.
 
 ## Estado da validação
 

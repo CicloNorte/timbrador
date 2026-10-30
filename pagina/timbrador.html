@@ -118,7 +118,7 @@
     <div class="marca" id="marca-bloco">
       <div class="lista-topo">
         <span><strong>Marca</strong> <span id="marca-estado">não configurada</span></span>
-        <span class="botoes"><button type="button" class="acao" id="marca-editar">Configurar</button><button type="button" class="acao" id="marca-exportar" hidden>Exportar</button><button type="button" class="acao" id="marca-carregar">Importar</button></span>
+        <span class="botoes"><button type="button" class="acao" id="marca-editar">Configurar</button><button type="button" class="acao" id="marca-exportar" hidden>Exportar</button><button type="button" class="acao" id="marca-carregar">Importar</button><button type="button" class="acao" id="marca-site" hidden>Usar a do site</button></span>
       </div>
       <div class="dica" id="marca-dica">Configure a organização e as empresas que timbram documentos: nome, razão social, documento, cidade, cor e logo. Fica guardado neste navegador. Para usar em outro computador ou com o Claude, exporte o marca.json; para usar um que já existe, importe.</div>
       <input type="file" id="marca-arquivo" accept=".json,application/json">
@@ -1774,6 +1774,9 @@ function organizar(itens) {
      A marca configurada aqui é guardada no formato do marca.json (o mesmo do gerador e do Claude) e passa pela
      mesma validação (carregarMarca); exportar entrega esse arquivo, com os logos embutidos. */
   let cfgAtual = null;     // a marca em uso, como objeto marca.json
+  // Marca padrão do site: um marca.json servido ao lado da página (fora do git). Vale enquanto o navegador
+  // não guardou uma própria; editar ou importar guarda a cópia deste navegador.
+  let marcaSite = null, usandoSite = false;
   // Monta as listas da página a partir do cadastro carregado: empresas, tipos e áreas ativos, logo, cor e rodapé.
   function aplicarMarca() {
     const antes = { empresa: $("empresa").value, tipo: $("tipo").value, area: $("area").value || guardado("area") };
@@ -1801,7 +1804,9 @@ function organizar(itens) {
     const incompletas = EMPRESAS_ATIVAS.filter(k => !cadastroCompleto(EMPRESAS[k]));
     $("marca-estado").textContent = `${ORG.organizacao || "sem nome de organização"} · ${EMPRESAS_ATIVAS.length} empresa(s)`;
     $("marca-dica").textContent = (incompletas.length ? `Só minuta ou em aprovação para ${incompletas.join(", ")}: falta razão social ou documento. ` : "") +
-      "Guardada neste navegador. Exporte o marca.json para levar a outro computador ou usar com o Claude.";
+      (usandoSite ? "Marca padrão deste site. Editar ou importar guarda uma cópia sua neste navegador."
+        : "Guardada neste navegador. Exporte o marca.json para levar a outro computador ou usar com o Claude.");
+    $("marca-site").hidden = usandoSite || !marcaSite;
     $("marca-editar").textContent = "Editar";
     $("marca-exportar").hidden = false;
     $("marca-bloco").classList.add("ligada");
@@ -1811,6 +1816,7 @@ function organizar(itens) {
     try { carregarMarca(texto); }
     catch (e) { msg(escH(e.message), "erro"); return false; }
     cfgAtual = JSON.parse(texto);
+    usandoSite = false;
     if (guardarNoNavegador && !guardar("marca", texto)) msg("A marca está em uso, mas não coube no armazenamento do navegador: ao fechar a página, ela se perde. Use logos menores.", "erro");
     aplicarMarca();
     $("marca-colar").open = false; $("marca-texto").value = "";
@@ -2500,6 +2506,28 @@ function organizar(itens) {
   usarEnvolvidos([], false);
 
   // marca da última vez, guardada neste navegador
+  // marca padrão do site; só usada se este navegador não guardou uma
+  const usarMarcaSite = () => {
+    try { carregarMarca(marcaSite); } catch (e) { msg("A marca padrão deste site não vale: " + escH(e.message), "erro"); return; }
+    cfgAtual = JSON.parse(marcaSite); usandoSite = true; aplicarMarca(); atualizarDicas(); mostrarLista();
+  };
+  $("marca-site").addEventListener("click", () => {
+    if (!marcaSite || !confirm("Voltar à marca padrão do site? A marca guardada neste navegador será apagada (exporte antes, se quiser guardá-la).")) return;
+    try { localStorage.removeItem("timbrador.marca"); } catch (e) { /* sem armazenamento */ }
+    usarMarcaSite(); msg("Usando a marca padrão do site.", "ok");
+  });
+  (async () => {
+    if (!/^https?:$/.test(location.protocol) || typeof fetch !== "function") return;   // aberta do disco: não há site
+    try {
+      const r = await fetch("marca.json", { cache: "no-cache" });
+      if (!r.ok) return;
+      const t = await r.text();
+      JSON.parse(t);
+      marcaSite = t;
+      if (!cfgAtual) usarMarcaSite();              // navegador sem marca própria: a do site
+      else $("marca-site").hidden = false;         // com marca própria: oferece voltar à do site
+    } catch (e) { marcaSite = null; /* site sem marca padrão, ou marca inválida: segue como está */ }
+  })();
   { const m = guardado("marca"); if (m) { try { carregarMarca(m); cfgAtual = JSON.parse(m); aplicarMarca(); atualizarDicas(); mostrarLista(); } catch (e) { msg("A marca guardada neste navegador não vale mais: " + escH(e.message) + " Carregue o marca.json de novo.", "erro"); } } }
 
   // texto colado: pela caixa "Ou cole o texto aqui" ou com Ctrl+V em qualquer parte da página fora dos campos
