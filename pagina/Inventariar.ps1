@@ -1,5 +1,7 @@
 ﻿# Inventariar.ps1 - Timbrador (white label)
-# Varre a pasta dos documentos (subpastas com as siglas de tipo), le cada .docx e monta o lista-mestra.json.
+# Varre a pasta dos documentos (subpastas com as siglas de tipo, Obsoletos e Projetos/Nome; Modelos fica de fora),
+# le cada .docx e monta o lista-mestra.json. Mesmas regras do gerar_documento.py --inventariar, inclusive o
+# SHA-256 das rodadas do relatorio de conducao.
 # Nao instala nada: usa so o que ja vem no Windows PowerShell 5.1 ou superior.
 # A organizacao (nome, politica, empresa padrao, tipos extras) vem do marca.json: -Marca, a variavel
 # TIMBRADOR_MARCA ou um marca.json na mesma pasta deste script. Nenhum dado de empresa fica aqui.
@@ -143,6 +145,74 @@ function Sem-Acento([string]$t) {
   return (($sb.ToString().ToLower()) -replace "[^a-z0-9]+", " ").Trim()
 }
 
+function Limpo($t) {
+  # espaços colapsados e Unicode em NFC, como o _limpo do gerador: é sobre este texto que a impressão digital é feita
+  if ($null -eq $t) { return "" }
+  return (("$t").Normalize([Text.NormalizationForm]::FormC) -replace "\s+", " ").Trim()
+}
+
+function Pasta-Obsoletos([string]$rel) {
+  foreach ($p in ("$rel" -split "[\\/]")) { if ($p.ToLower() -eq "obsoletos") { return $true } }
+  return $false
+}
+
+function Projeto-Da-Pasta([string]$pasta) {
+  # "Projetos/Novo Site/..." -> "Novo Site"
+  $partes = @("$pasta" -split "[\\/]")
+  for ($i = 0; $i -lt $partes.Count - 1; $i++) {
+    if ((Sem-Acento $partes[$i]) -eq "projetos" -and $partes[$i + 1]) { return $partes[$i + 1] }
+  }
+  return ""
+}
+
+# ---------------------------------------------------------------- relatorio de conducao (REL com rodadas)
+# Mesmas regras do gerador (celulas_rodada, digital_rodada): o SHA-256 de cada rodada e calculado sobre o texto
+# das cinco celulas da linha no Quadro de rodadas, juntas por quebra de linha.
+$EVENTOS_REL = @{ abertura = ""; rodada = ""; replanejamento = "Replanejamento"; parada = "Parada declarada";
+                  retomada = "Retomada"; correcao = "Correção"; encerramento = "Encerramento" }
+$SHA256 = [System.Security.Cryptography.SHA256]::Create()
+
+function Celulas-Rodada($r) {
+  $tipo = "$(Valor $r 'tipo')"; if (-not $tipo) { $tipo = "rodada" }
+  if ($tipo -eq "replanejamento") { $pre = "Replanejamento: plano passa à v" + ((Limpo (Valor $r "plano_versao")) -replace "^[vV]", "") + "." }
+  elseif ($tipo -eq "correcao") { $pre = "Correção da rodada " + (Limpo (Valor $r "corrige")) + ":" }
+  elseif ($tipo -eq "encerramento") { $pre = "Encerramento (" + (Limpo (Valor $r "situacao")) + "), com o termo " + (Limpo (Valor $r "termo")) + "." }
+  elseif ($EVENTOS_REL[$tipo]) { $pre = $EVENTOS_REL[$tipo] + ":" }
+  else { $pre = "" }
+  $c = Valor $r "compromisso"
+  $ate = Limpo (Valor $c "ate")
+  $partes = @(@((Limpo (Valor $c "oque")), (Limpo (Valor $c "quem")), $(if ($ate) { "até $ate" } else { "" })) | Where-Object { $_ })
+  $comp = if ($partes.Count -gt 0) { $partes -join " · " } else { "—" }
+  $av = "$(Valor $r 'avanco')"
+  if ($av -eq "sim") { $avanco = "Sim" }
+  elseif ($av -eq "nao") {
+    $dep = Limpo (Valor $r "depende")
+    $avanco = "Não: " + (Limpo (Valor $r "travou")) + $(if ($dep) { "; depende de $dep" } else { "" })
+  } else { $avanco = "—" }
+  return @(("" + [int](Valor $r "n")), (Limpo (Valor $r "data")), (Limpo ($pre + " " + (Limpo (Valor $r "feito")))), $comp, (Limpo $avanco))
+}
+
+function Digital-Rodada($r) {
+  $bytes = [Text.Encoding]::UTF8.GetBytes(((Celulas-Rodada $r) -join "`n"))
+  return (($SHA256.ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") }) -join "")
+}
+
+# devolve sempre uma lista (vazia, se nao houver rodadas)
+function Digitais-Rodadas($rodadas) {
+  $lista = New-Object System.Collections.Generic.List[string]
+  foreach ($r in @($rodadas)) { if ($null -ne $r) { $lista.Add((Digital-Rodada $r)) } }
+  return ,$lista
+}
+
+function Encerramento-Rel($rodadas) {
+  foreach ($r in @($rodadas)) { if ($null -ne $r -and "$(Valor $r 'tipo')" -eq "encerramento") { return $r } }
+  return $null
+}
+
+function Tem-Rodadas($spec) {
+  return ("$($spec['tipo'])" -eq "REL" -and $spec.Contains("rodadas") -and @($spec["rodadas"] | Where-Object { $null -ne $_ }).Count -gt 0)
+}
+
 # ---------------------------------------------------------------- marca.json
 # Mesmas regras do gerador (gerar_documento.py --inventariar --marca): empresa padrao, nome da organizacao,
 # codigo da politica e tipos extras vem dele.
@@ -191,21 +261,30 @@ if ($Lista) {
 }
 if (-not $destino.ToLower().EndsWith(".json")) { $destino = Join-Path $destino "lista-mestra.json" }
 
-$achados = @(); $semId = @(); $ignorados = 0; $modelos = @()
-# Pastas puladas por padrao: o arquivo morto nao faz parte do que esta em uso.
-# Para inventariar o proprio arquivo morto, aponte -Pasta para ele: a raiz nunca e pulada.
-$PASTAS_IGNORADAS = @("obsoletos")
+# Pastas fora da varredura: Modelos guarda os arquivos de partida, que nao sao documentos. Obsoletos e lida, mas so
+# decide a entrada de um codigo que nao tem mais nenhuma versao em uso. Mesmas regras do --inventariar do gerador.
+$PASTAS_IGNORADAS = @("modelos")
 $pular = @($Ignorar | ForEach-Object { $_.ToLower() }) + $PASTAS_IGNORADAS
+# caminho relativo a raiz, sempre com "/" (como o gerador e a pagina registram a pasta)
+function Relativo([string]$caminho) { return $caminho.Substring($raiz.Length).TrimStart("\", "/").Replace("\", "/") }
+function Fora-Da-Varredura([string]$rel) {
+  foreach ($p in @($rel -split "/" | Where-Object { $_ })) { if ($p.StartsWith(".") -or ($pular -contains $p.ToLower())) { return $true } }
+  return $false
+}
+$visitadas = New-Object System.Collections.Generic.HashSet[string]
+[void]$visitadas.Add("")
+foreach ($d in Get-ChildItem -LiteralPath $raiz -Recurse -Directory -ErrorAction SilentlyContinue) {
+  $r = Relativo $d.FullName
+  if (-not (Fora-Da-Varredura $r)) { [void]$visitadas.Add($r) }
+}
+
+$achados = @(); $semId = @(); $ignorados = 0; $modelos = @()
 foreach ($arq in Get-ChildItem -LiteralPath $raiz -Recurse -File) {
   if ($arq.Name.StartsWith("~$") -or $arq.Name.StartsWith(".")) { continue }
-  if ($pular.Count -gt 0) {
-    $partes = @($arq.DirectoryName.Substring($raiz.Length).Split([char]"\", [char]"/") | Where-Object { $_ } | ForEach-Object { $_.ToLower() })
-    $achouPular = $false
-    foreach ($p in $partes) { if ($pular -contains $p) { $achouPular = $true; break } }
-    if ($achouPular) { continue }
-  }
+  $pastaRel = Relativo $arq.DirectoryName
+  if (Fora-Da-Varredura $pastaRel) { continue }
   if ($arq.Extension -ne ".docx") { if ($arq.Extension -ne ".json") { $ignorados++ }; continue }
-  $rel = $arq.FullName.Substring($raiz.Length).TrimStart("\", "/")
+  $rel = Relativo $arq.FullName
   try { $r = Ficha-Do-Docx $arq.FullName }
   catch { $semId += ,@($rel, "nao foi possivel abrir o arquivo"); continue }
   $spec = $r.spec; $origem = $r.origem
@@ -226,6 +305,7 @@ foreach ($arq in Get-ChildItem -LiteralPath $raiz -Recurse -File) {
   if (-not $spec.Contains("estado")  -or -not $spec["estado"])  { $spec["estado"] = "MINUTA" }
   if (-not $spec.Contains("versao")  -or -not $spec["versao"])  { $spec["versao"] = "1.0" }
   if (-not $spec.Contains("titulo")  -or -not $spec["titulo"])  { $spec["titulo"] = [IO.Path]::GetFileNameWithoutExtension($arq.Name) }
+  if ((-not $spec.Contains("ano") -or -not $spec["ano"]) -and $spec.Contains("codigo") -and "$($spec['codigo'])" -match "/(\d{4})$") { $spec["ano"] = [int]$Matches[1] }
   if (-not $spec.Contains("codigo") -or -not $spec["codigo"]) {
     $num = "XXX"
     if ($spec.Contains("numero") -and $spec["numero"]) { $num = "{0:d3}" -f [int]$spec["numero"] }
@@ -233,8 +313,9 @@ foreach ($arq in Get-ChildItem -LiteralPath $raiz -Recurse -File) {
     if (($TIPOS_CURTOS -contains $spec["tipo"]) -and $spec.Contains("ano") -and $spec["ano"]) { $codigo += "/$($spec['ano'])" }
     $spec["codigo"] = $codigo
   }
-  $pastaRel = [IO.Path]::GetDirectoryName($rel); if (-not $pastaRel) { $pastaRel = "." }
-  $achados += ,[pscustomobject]@{ spec = $spec; origem = $origem; nome = $arq.Name; pasta = $pastaRel }
+  if (-not $pastaRel) { $pastaRel = "." }
+  $obsoleta = (Pasta-Obsoletos $pastaRel) -or ("$($spec['estado'])" -eq "OBSOLETO")
+  $achados += ,[pscustomobject]@{ spec = $spec; origem = $origem; nome = $arq.Name; pasta = $pastaRel; obsoleta = $obsoleta }
 }
 
 # ---------------------------------------------------------------- uma entrada por codigo
@@ -243,7 +324,7 @@ $antiga = $null
 if (Test-Path -LiteralPath $destino) {
   try {
     $antiga = (Get-Content -LiteralPath $destino -Raw -Encoding UTF8) | ConvertFrom-Json
-      foreach ($d in @($antiga.documentos)) { if ($d.codigo) { $existentes[(Chave-Registro $d.codigo $d.numero $d.arquivo)] = $d } }
+    foreach ($d in @($antiga.documentos)) { if ($d.codigo) { $existentes[(Chave-Registro $d.codigo $d.numero $d.arquivo)] = $d } }
   } catch { Write-Host "  (lista existente ilegivel: sera refeita)" }
 }
 
@@ -256,45 +337,143 @@ foreach ($a in $achados) {
 }
 
 $agora = (Get-Date).ToString("dd/MM/yyyy HH:mm")
-$documentos = @(); $conflitos = @(); $varias = @()
-foreach ($chave in $porCodigo.Keys) {
+$documentos = @(); $conflitos = @(); $varias = @(); $alertas = @()
+$versaoBase = { param($v) ("$v" -split "-r", 2)[0] }
+foreach ($chave in @($porCodigo.Keys | Sort-Object)) {
   $itens = @($porCodigo[$chave] | Sort-Object @{ Expression = { (Chave-Versao $_.spec["versao"])[0] } },
                                               @{ Expression = { (Chave-Versao $_.spec["versao"])[1] } },
                                               @{ Expression = { (Chave-Versao $_.spec["versao"])[2] } },
                                               @{ Expression = { (Chave-Versao $_.spec["versao"])[3] } },
                                               @{ Expression = { $ORDEM_ESTADO["$($_.spec['estado'])"] } })
-  $atual = $itens[-1]; $s = $atual.spec
+  $codigo = ($chave -split "\|", 2)[0]
+  # vale a versao em uso: a oficial mais alta; sem oficial, a mais alta em uso; sem nenhuma em uso, a copia obsoleta
+  $emUso = @($itens | Where-Object { -not $_.obsoleta })
+  $oficiais = @($emUso | Where-Object { "$($_.spec['estado'])" -eq "OFICIAL" })
+  $copias = @($itens | Where-Object { $_.obsoleta })
+  if ($oficiais.Count -gt 0) { $atual = $oficiais[-1] } elseif ($emUso.Count -gt 0) { $atual = $emUso[-1] } else { $atual = $copias[-1] }
+  # oficial cuja versao ja tem copia obsoleta: foi substituida e o arquivo ficou para tras na pasta
+  if ("$($atual.spec['estado'])" -eq "OFICIAL") {
+    $ja = $null
+    foreach ($c in $copias) { if ((Compara-Versao $c.spec["versao"] $atual.spec["versao"]) -ge 0) { $ja = $c; break } }
+    if ($ja) {
+      $alertas += "$codigo v$($atual.spec['versao']): o arquivo oficial ainda esta em $($atual.pasta), mas essa versao ja tem copia obsoleta em $($ja.pasta). Retire o oficial da pasta."
+      $atual = $ja
+    }
+  }
+  $s = $atual.spec
+  $listaOficiais = ($oficiais | ForEach-Object { "v$($_.spec['versao']) em $($_.pasta)" }) -join "; "
+  if ($oficiais.Count -gt 1 -and (Tem-Rodadas $s)) {
+    $alertas += "${codigo}: relatorio de conducao com mais de um arquivo em uso ($listaOficiais). A v$($oficiais[-1].spec['versao']) contem as rodadas das anteriores: retire as anteriores da pasta (relatorio de conducao nao tem copia obsoleta)."
+  } elseif ($oficiais.Count -gt 1) {
+    $alertas += "${codigo}: mais de uma versao oficial em uso ($listaOficiais). A anterior precisa ser tornada obsoleta."
+  }
+  if ($oficiais.Count -gt 0) {
+    $ult = $oficiais[-1].spec["versao"]
+    foreach ($m in $emUso) {
+      if ("$($m.spec['estado'])" -ne "OFICIAL" -and (Compara-Versao (& $versaoBase $m.spec["versao"]) (& $versaoBase $ult)) -le 0) {
+        $alertas += "${codigo}: a versao $($m.spec['versao']) ($($m.spec['estado']), em $($m.pasta)) e de uma versao ja publicada (v$ult) e pode sair da pasta."
+      }
+    }
+  }
+  foreach ($c in $copias) {
+    if (-not (Pasta-Obsoletos $c.pasta)) { $alertas += "$($c.nome): copia obsoleta fora da pasta OBSOLETOS (esta em $($c.pasta))." }
+  }
+  foreach ($m in $emUso) {
+    $pj = ""; if ($m.spec.Contains("projeto")) { $pj = "$($m.spec['projeto'])" }
+    if ($pj -and (Sem-Acento (Projeto-Da-Pasta $m.pasta)) -ne (Sem-Acento $pj)) {
+      $alertas += "$($m.nome): e do projeto `"$pj`", mas esta em $($m.pasta). Documento de projeto fica em Projetos/$pj."
+    }
+  }
   $titulos = @($itens | ForEach-Object { $_.spec["titulo"] } | Where-Object { $_ } | Select-Object -Unique)
-  $codigo = $s["codigo"]
   if (@($titulos | ForEach-Object { Sem-Acento $_ } | Select-Object -Unique).Count -gt 1) { $conflitos += ,@($codigo, $titulos) }
   if ($itens.Count -gt 1) { $varias += ,@($codigo, @($itens | ForEach-Object { "$($_.spec['versao']) $($_.spec['estado'])" })) }
   $antes = $existentes[$chave]
   $numero = $null; if ($s.Contains("numero") -and $s["numero"]) { $numero = [int]$s["numero"] }
   $ano = $null;    if ($s.Contains("ano") -and $s["ano"])       { $ano = [int]$s["ano"] }
   $data = $null
-  foreach ($k in @("data_aprovacao", "data_emissao")) { if (-not $data -and $s.Contains($k)) { $data = $s[$k] } }
+  foreach ($k in @("data_aprovacao", "data_emissao")) { if (-not $data -and $s.Contains($k) -and $s[$k]) { $data = $s[$k] } }
   $resp = ""; if ($s.Contains("elaborado_por") -and $s["elaborado_por"]) { $resp = $s["elaborado_por"] }
   $reg = [ordered]@{
-    codigo = $codigo; titulo = $s["titulo"]; empresa = $s["empresa"]; tipo = $s["tipo"]; area = $s["area"]
+    codigo = $s["codigo"]; titulo = $s["titulo"]; empresa = $s["empresa"]; tipo = $s["tipo"]; area = $s["area"]
     numero = $numero; ano = $ano; versao = $s["versao"]; estado = $s["estado"]; data = $data
-    responsavel = $resp; arquivo = $atual.nome; pasta = $atual.pasta; origem = $atual.origem
+    responsavel = $resp; arquivo = $atual.nome
   }
-  if ($s.Contains("substituido_por") -and $s["substituido_por"]) { $reg["substituido_por"] = $s["substituido_por"] }
+  # substituido_por so vale para a entrada obsoleta
+  if ("$($s['estado'])" -eq "OBSOLETO" -and $s.Contains("substituido_por") -and $s["substituido_por"]) { $reg["substituido_por"] = $s["substituido_por"] }
+  if ($s.Contains("projeto") -and $s["projeto"]) { $reg["projeto"] = $s["projeto"] }
+  if (Tem-Rodadas $s) {   # relatorio de conducao: plano e impressao digital das rodadas
+    $reg["plano"] = $s["plano"]
+    $reg["rodadas_sha256"] = Digitais-Rodadas $s["rodadas"]
+    $fim = Encerramento-Rel $s["rodadas"]
+    if ($fim) { $reg["encerrado_por"] = Valor $fim "termo" }
+  }
+  $reg["pasta"] = $atual.pasta; $reg["origem"] = $atual.origem
+  if (-not $reg.Contains("projeto") -and (Projeto-Da-Pasta $atual.pasta)) { $reg["projeto"] = Projeto-Da-Pasta $atual.pasta }   # documento antigo, sem o campo na ficha
   if ($itens.Count -gt 1) { $reg["arquivos"] = $itens.Count }
-  $reg["registrado_em"] = if ($antes -and $antes.registrado_em) { $antes.registrado_em } else { $agora }
-  $reg["atualizado_em"] = $agora
-  $documentos += ,$reg
+  if (Tem-Rodadas $s) {
+    # as rodadas do arquivo conferem com as registradas na lista e com as das versoes anteriores ainda na pasta?
+    # rodada que nao confere nao passa para a lista: ela mantem as registradas
+    $hs = @($reg["rodadas_sha256"])
+    $pub = @(); if ($antes -and (Valor $antes "rodadas_sha256")) { $pub = @($antes.rodadas_sha256) }
+    if ($pub.Count -gt $hs.Count) {
+      $alertas += "${codigo}: a lista mestra registra $($pub.Count) rodada(s), mas o arquivo mais recente na pasta (v$($s['versao'])) tem $($hs.Count). A versao vigente sumiu da pasta?"
+      $reg["rodadas_sha256"] = $pub
+    } elseif ($pub.Count -gt 0 -and (($hs[0..($pub.Count - 1)]) -join ",") -ne ($pub -join ",")) {
+      $alertas += "$codigo v$($s['versao']): as rodadas nao conferem com as registradas na lista mestra (rodada publicada alterada). A lista mantem as rodadas registradas."
+      $reg["rodadas_sha256"] = $pub
+    }
+    foreach ($m in $emUso) {
+      if ([object]::ReferenceEquals($m.spec, $s)) { continue }
+      # a funcao devolve a lista inteira como um objeto so: guardar antes de abrir em @() (senao vira lista de lista)
+      $h2 = @(); if ($m.spec.Contains("rodadas")) { $t = Digitais-Rodadas $m.spec["rodadas"]; $h2 = @($t) }
+      $prefixo = if ($h2.Count -gt 0) { ($hs[0..([Math]::Min($h2.Count, $hs.Count) - 1)]) -join "," } else { "" }
+      if ($h2.Count -gt $hs.Count -or ($h2 -join ",") -ne $prefixo) {
+        $alertas += "$($m.nome): as rodadas desta versao nao conferem com as da v$($s['versao']) (rodada publicada alterada)."
+      }
+    }
+  }
+  # mesma regra do gerador: a entrada antiga e atualizada, e o que so valia para a obsoleta nao sobrevive
+  $novo = [ordered]@{}
+  if ($antes) { foreach ($p in $antes.PSObject.Properties) { $novo[$p.Name] = $p.Value } }
+  foreach ($k in $reg.Keys) { $novo[$k] = $reg[$k] }
+  foreach ($k in @("substituido_por", "motivo_obsoleto")) { if (-not $reg.Contains($k) -and $novo.Contains($k)) { $novo.Remove($k) } }
+  $novo["registrado_em"] = if ($antes -and $antes.registrado_em) { $antes.registrado_em } else { $agora }
+  $novo["atualizado_em"] = $agora
+  $documentos += ,$novo
   $existentes.Remove($chave) | Out-Null
 }
-# documentos que estavam na lista e nao foram encontrados agora continuam registrados
+# entradas da lista sem arquivo: saem quando a pasta registrada foi varrida (ou e a de Modelos); fora disso, ficam e
+# sao avisadas
+$removidas = @(); $naoConferidas = @()
 foreach ($c in @($existentes.Keys)) {
-  $d = $existentes[$c]; $o = [ordered]@{}
-  foreach ($p in $d.PSObject.Properties) { $o[$p.Name] = $p.Value }
+  $d = $existentes[$c]
+  $p = "$($d.pasta)".Replace("\", "/")
+  if ($null -eq $d.PSObject.Properties["pasta"]) { $naoConferidas += "$($d.codigo) (sem pasta registrada)" }
+  else {
+    if ($p -eq ".") { $p = "" }
+    $ignorada = $false
+    foreach ($x in @($p -split "/")) { if ($PASTAS_IGNORADAS -contains $x.ToLower()) { $ignorada = $true } }
+    if ($ignorada -or $visitadas.Contains($p)) {
+      $arqOuPasta = "$(Valor $d 'arquivo')"; if (-not $arqOuPasta) { $arqOuPasta = $p }
+      $removidas += "$($d.codigo) v$($d.versao) ($arqOuPasta)"
+      continue
+    }
+    $naoConferidas += "$($d.codigo) ($p)"
+  }
+  $o = [ordered]@{}
+  foreach ($prop in $d.PSObject.Properties) { $o[$prop.Name] = $prop.Value }
   $documentos += ,$o
 }
 $documentos = @($documentos | Sort-Object @{ Expression = { "$($_.empresa)" } }, @{ Expression = { "$($_.tipo)" } },
                                           @{ Expression = { "$($_.area)" } }, @{ Expression = { "$($_.ano)" } },
                                           @{ Expression = { [int]("0" + "$($_.numero)") } }, @{ Expression = { "$($_.arquivo)" } })
+# relatorio de conducao: o plano dele tem de estar oficial
+foreach ($d in $documentos) {
+  if ("$($d.tipo)" -eq "REL" -and $d.plano) {
+    $pl = @($documentos | Where-Object { "$($_.codigo)" -eq "$($d.plano)" })
+    if ($pl.Count -eq 0 -or "$($pl[0].estado)" -ne "OFICIAL") { $alertas += "$($d.codigo): o plano $($d.plano) nao esta oficial na lista mestra." }
+  }
+}
 
 # ---------------------------------------------------------------- relatorio
 $conta = { param($valores)
@@ -315,8 +494,16 @@ Write-Host ""
 if (@($documentos | Where-Object { $_.origem -eq "nome" -or $_.origem -eq "cabecalho" }).Count -gt 0) {
   Write-Host "  (* dados lidos do cabecalho ou do nome do arquivo: confira titulo e responsavel)"
 }
+foreach ($al in $alertas) { Write-Host "  ATENCAO - $al" }
+if ($removidas.Count -gt 0) {
+  Write-Host ("  Sairam da lista {0} entrada(s) cujo arquivo nao esta mais na pasta:" -f $removidas.Count)
+  foreach ($x in $removidas) { Write-Host "    $x" }
+}
+if ($naoConferidas.Count -gt 0) {
+  Write-Host ("  {0} entrada(s) ficaram sem conferir (pasta nao varrida): {1}" -f $naoConferidas.Count, ($naoConferidas -join "; "))
+}
 if ($varias.Count -gt 0) {
-  Write-Host ("  {0} documento(s) com mais de um arquivo na pasta (ficou a versao mais alta):" -f $varias.Count)
+  Write-Host ("  {0} documento(s) com mais de um arquivo (na lista ficou a versao em uso: a oficial mais alta, quando ha):" -f $varias.Count)
   foreach ($v in $varias) { Write-Host ("    {0}: {1}" -f $v[0], ($v[1] -join ", ")) }
 }
 if ($conflitos.Count -gt 0) {

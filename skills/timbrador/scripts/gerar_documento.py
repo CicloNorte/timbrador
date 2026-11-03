@@ -13,7 +13,7 @@ ativos, código da política) vem do marca.json; nenhum dado de organização fi
 biblioteca padrão do Python; LibreOffice (soffice, ou o comando em TIMBRADOR_SOFFICE) e pdftotext são
 opcionais e servem para numerar as páginas do sumário e gerar o PDF de conferência.
 """
-import json, re, sys, os, zipfile, shutil, subprocess, tempfile, argparse, datetime, unicodedata, base64, shlex, struct
+import json, re, sys, os, zipfile, shutil, hashlib, subprocess, tempfile, argparse, datetime, unicodedata, base64, shlex, struct
 from xml.sax.saxutils import escape
 
 EMU_CM = 360000
@@ -814,6 +814,177 @@ def para_pdf(docx, pasta):
     return pdf if os.path.exists(pdf) else None
 
 
+# Regra do padrão: assinatura entra só pelo Timbrador (a página), na caixa "Com assinatura". Este gerador não põe
+# assinatura em documento nenhum: tira do corpo as linhas ou a tabela de assinaturas (e o local e data que as antecede)
+# e guarda os envolvidos como "assinaturas_previstas" na ficha. Ao abrir o arquivo na página, eles já vêm preenchidos,
+# com a caixa desmarcada: quem timbra decide. A cópia OBSOLETO de uma versão já assinada fica como estava.
+def adiar_assinaturas(spec):
+    corpo = spec.get("corpo") or []
+    previstas = [dict(a) for a in spec.get("assinaturas_previstas") or []] + [dict(a) for a in spec.get("envolvidos") or []]
+    fora, tinha = [], False
+    for b in corpo:
+        if isinstance(b, dict) and b.get("t") == "assinaturas":
+            tinha = True
+            previstas += [{"nome": a.get("nome", ""), "cargo": a.get("cargo", ""), "papel": a.get("papel") or a.get("documento", "")} for a in b.get("itens", [])]
+        elif isinstance(b, dict) and _eh_tabela_assinaturas(b):
+            tinha = True
+            previstas += [{"nome": (l + ["", "", ""])[0], "cargo": (l + ["", "", ""])[1], "papel": (l + ["", "", ""])[2]} for l in b.get("linhas", [])]
+        else:
+            fora.append(b)
+    if tinha:
+        while fora and isinstance(fora[-1], dict) and (fora[-1].get("t") == "local_data" or
+                                                       (fora[-1].get("t") == "p" and re.fullmatch(r"\**Assinaturas\**", fora[-1].get("texto", "")))):
+            fora.pop()
+    pedia = bool(spec.get("com_assinatura"))
+    for k in ("com_assinatura", "envolvidos", "assinatura_formato"):
+        spec.pop(k, None)
+    spec["corpo"] = fora
+    vistos, unicas = set(), []
+    for a in previstas:
+        chave = str(a.get("nome", "")).strip().lower()
+        if chave and chave not in vistos:
+            vistos.add(chave); unicas.append({k: a.get(k, "") for k in ("nome", "cargo", "papel")})
+    if unicas: spec["assinaturas_previstas"] = unicas
+    else: spec.pop("assinaturas_previstas", None)
+    if tinha or pedia:
+        return ("Assinaturas não entram pelo gerador: elas são colocadas no Timbrador (página), na caixa \"Com assinatura\". "
+                + (f"Os envolvidos ({', '.join(a['nome'] for a in unicas)}) ficaram registrados como previstos e já vêm preenchidos ao abrir o arquivo na página."
+                   if unicas else ""))
+    return None
+
+
+# Anexos externos: arquivos que acompanham o documento (conversas exportadas em XML, planilhas, fotos…). Ficam numa
+# pasta com o código do documento, ao lado do .docx, com o nome "Anexo 01 – nome original"; o documento os lista numa
+# seção "Anexos", antes do local e data, com tamanho e SHA-256. Mesma regra da página.
+CAB_ANEXOS = ["Nº", "Arquivo", "Tamanho"]
+TEXTO_ANEXOS = ("Os arquivos abaixo acompanham este documento e ficam na mesma pasta. A impressão digital SHA-256 "
+                "permite conferir que o arquivo não foi alterado.")
+
+
+def tamanho_txt(n):
+    n = int(n or 0)
+    if n < 1024: return f"{n} B"
+    return f"{n / 1024:.1f} KB".replace(".", ",") if n < 1048576 else f"{n / 1048576:.1f} MB".replace(".", ",")
+
+
+def nome_anexo(i, original, versao=None):
+    return f"Anexo {i:02d}{f' (v{versao})' if versao else ''} – {original}"
+
+
+def nome_pasta_doc(spec):
+    """Pasta do documento com anexos: o código; minuta (XXX) leva também o título."""
+    cod = str(spec.get("codigo") or "").replace("/", "-")
+    if "XXX" not in cod: return cod
+    t = re.sub(r"\s+", " ", re.sub(r'[\\/:*?"<>|()]+', " ", str(spec.get("titulo") or ""))).strip()[:60].strip()
+    return f"{cod} – {t}" if t else cod
+
+
+def bloco_anexos(itens, largura_tw):
+    if not itens: return ""
+    w1, w3 = int(1.2 * TW_CM), int(2.3 * TW_CM)
+    ws = [w1, largura_tw - w1 - w3, w3]
+    borda = "<w:tblBorders>" + "".join(f'<w:{l} w:val="single" w:sz="4" w:space="0" w:color="000000"/>'
+                                       for l in ("top", "left", "bottom", "right", "insideH", "insideV")) + "</w:tblBorders>"
+    def cel(w, c, cab=False):
+        sombra = f'<w:shd w:val="clear" w:color="auto" w:fill="{realce()}"/>' if cab else ""
+        return f'<w:tc><w:tcPr><w:tcW w:w="{w}" w:type="dxa"/>{sombra}<w:vAlign w:val="center"/></w:tcPr>{c}</w:tc>'
+    t = (f'<w:tbl><w:tblPr><w:tblW w:w="{largura_tw}" w:type="dxa"/>{borda}<w:tblLayout w:type="fixed"/>'
+         f'<w:tblCellMar><w:left w:w="85" w:type="dxa"/><w:right w:w="85" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>{grade(ws)}</w:tblGrid>'
+         '<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>' +
+         "".join(cel(ws[i], par(run(c, b=True, sz=10), jc="center", estilo="TabelaTexto"), True) for i, c in enumerate(CAB_ANEXOS)) + "</w:tr>")
+    for i, a in enumerate(itens):
+        arq = (par(run(a.get("nome") or a.get("original", ""), sz=10), estilo="TabelaTexto", antes=0, depois=0) +
+               par(run(f'SHA-256: {a.get("sha256", "")}', sz=7, fonte="Courier New"), estilo="TabelaTexto", antes=0, depois=0))
+        t += ('<w:tr><w:trPr><w:cantSplit/></w:trPr>' + cel(ws[0], par(run(str(i + 1), sz=10), jc="center", estilo="TabelaTexto")) +
+              cel(ws[1], arq) + cel(ws[2], par(run(tamanho_txt(a.get("tamanho")), sz=10), jc="right", estilo="TabelaTexto")) + "</w:tr>")
+    return (par(run("Anexos", b=True), estilo="SemRecuo", keep=True, antes=240) + par(run(TEXTO_ANEXOS, sz=10), estilo="SemRecuo", keep=True)
+            + t + "</w:tbl>" + par("", antes=0, depois=0, linha=240))
+
+
+def _eh_tabela_anexos(b):
+    return isinstance(b, dict) and b.get("t") == "tabela" and [str(c).replace("*", "").strip() for c in (b.get("cabecalho") or [])] == CAB_ANEXOS
+
+
+def extrair_anexos(corpo):
+    """Tira do corpo a seção Anexos (título, texto e tabela): a lista vem da ficha."""
+    fora = []
+    for b in corpo or []:
+        if isinstance(b, dict) and (b.get("t") == "anexos_externos" or _eh_tabela_anexos(b)):
+            while fora and isinstance(fora[-1], dict) and fora[-1].get("t") == "p" and \
+                    str(fora[-1].get("texto", "")).replace("*", "").strip() in ("Anexos", TEXTO_ANEXOS):
+                fora.pop()
+            continue
+        fora.append(b)
+    return fora
+
+
+def montar_anexos(spec):
+    """Seção Anexos no fim do conteúdo, antes do local e data e das assinaturas."""
+    corpo = extrair_anexos(spec.get("corpo"))
+    itens = [a for a in spec.get("anexos_externos") or [] if isinstance(a, dict)]
+    if spec.get("com_anexos") and itens:
+        k = len(corpo)
+        while k and isinstance(corpo[k - 1], dict) and (corpo[k - 1].get("t") in ("assinaturas", "local_data") or _eh_tabela_assinaturas(corpo[k - 1])
+                                                        or (corpo[k - 1].get("t") == "p" and re.fullmatch(r"\**Assinaturas\**", corpo[k - 1].get("texto", "")))):
+            k -= 1
+        corpo = corpo[:k] + [{"t": "anexos_externos", "itens": itens}] + corpo[k:]
+    spec["corpo"] = corpo
+
+
+def sha256_arquivo(caminho):
+    h = hashlib.sha256()
+    with open(caminho, "rb") as f:
+        for bloco in iter(lambda: f.read(1 << 20), b""):
+            h.update(bloco)
+    return h.hexdigest()
+
+
+def _confere(caminho, a):
+    return os.path.isfile(caminho) and os.path.getsize(caminho) == int(a.get("tamanho") or -1) and sha256_arquivo(caminho) == a.get("sha256")
+
+
+def preparar_anexos(spec, arquivos, pasta_doc):
+    """Grava os anexos na pasta do documento e põe a lista na especificação. Os já registrados na ficha precisam
+    estar na pasta (ou na pasta do arquivo lido pelo --atualizar) com o mesmo SHA-256. Nome ocupado por outro conteúdo
+    não é sobrescrito: o anexo novo leva a versão no nome, e a versão anterior continua íntegra."""
+    os.makedirs(pasta_doc, exist_ok=True)
+    origem = spec.pop("anexos_origem", None)
+    versao = str(spec.get("versao", "")).split("-r")[0]
+    itens, avisos, usados = [], [], set()
+    for a in [x for x in spec.get("anexos_externos") or [] if isinstance(x, dict)]:
+        nome = a.get("nome") or ""
+        if not _confere(os.path.join(pasta_doc, nome), a):
+            if origem and _confere(os.path.join(origem, nome), a):
+                shutil.copy2(os.path.join(origem, nome), os.path.join(pasta_doc, nome))
+            else:
+                raise SystemExit(f'Anexo "{nome}", registrado no documento, não está em {pasta_doc}'
+                                 + (f" nem em {origem}" if origem else "") + " com o mesmo conteúdo (SHA-256): passe o arquivo com --anexo, ou retire-o da lista \"anexos_externos\".")
+        itens.append({k: a.get(k) for k in ("nome", "original", "tamanho", "sha256")}); usados.add(nome)
+    for caminho in arquivos:
+        if not os.path.isfile(caminho):
+            raise SystemExit(f"Anexo não encontrado: {caminho}")
+        original, tamanho, sha = os.path.basename(caminho), os.path.getsize(caminho), sha256_arquivo(caminho)
+        if any(x["sha256"] == sha for x in itens):
+            avisos.append(f"{original}: arquivo repetido, entrou uma vez só."); continue
+        i, k = len(itens) + 1, 1
+        nome = nome_anexo(i, original)
+        while True:
+            destino = os.path.join(pasta_doc, nome)
+            if not os.path.exists(destino) and nome not in usados:
+                shutil.copy2(caminho, destino); break
+            if os.path.exists(destino) and nome not in usados and sha256_arquivo(destino) == sha:
+                break
+            k += 1
+            nome = nome_anexo(i, original, versao + (f"-{k - 1}" if k > 2 else ""))
+        usados.add(nome)
+        itens.append({"nome": nome, "original": original, "tamanho": tamanho, "sha256": sha})
+    if not itens:
+        raise SystemExit("Com anexos externos: informe ao menos um arquivo (--anexo).")
+    spec["anexos_externos"], spec["com_anexos"] = itens, True
+    avisos.append(f"Documento e {len(itens)} anexo(s) na pasta {pasta_doc}.")
+    return avisos
+
+
 def assinaturas_sozinhas(docx, spec):
     """Renderiza com LibreOffice e diz se a página do local e data e das assinaturas não tem mais nada do corpo
     (cabeçalho e rodapé, que se repetem em todas as páginas, não contam). None quando não dá para saber."""
@@ -890,6 +1061,8 @@ def blocos(ctx, lista, parte, largura_tw, longo):
             out += bloco_campos(b["itens"], largura_tw, b.get("rotulo_cm", 4.0))
         elif t == "assinaturas":
             out += bloco_assinaturas_tabela(b["itens"], largura_tw) if b.get("formato") == "tabela" else bloco_assinaturas(b["itens"], largura_tw)
+        elif t == "anexos_externos":
+            out += bloco_anexos(b["itens"], largura_tw)
         elif t == "local_data":
             dt = b.get("data") or datetime.date.today().strftime("%d/%m/%Y")   # sem data informada, usa a de hoje
             out += par(run(f'{b.get("local", dado("cidade"))}, {data_extenso(dt)}.'), estilo="SemRecuo", jc="right", antes=240, keep=True)
@@ -996,6 +1169,8 @@ def validar(spec):
         if novo != spec["titulo"]:
             av.append(f'Título sem o nome do tipo, que já sai impresso acima dele: "{spec["titulo"]}" passou a "{novo}".')
             spec["titulo"] = novo
+    if tipo == "PLN" and spec["estado"] != "OBSOLETO" and not spec.get("projeto"):
+        raise SystemExit("Plano é sempre de um projeto: informe 'projeto' (o documento vai para a pasta dele, em Projetos).")
     if "variante" not in spec:
         spec["variante"] = "longo" if tipo in TIPOS_LONGOS else "curto"
     if not spec.get("codigo"):
@@ -1235,12 +1410,13 @@ def partes_fontes(ctx, fontes):
     return f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:fonts {NS}>{xml}</w:fonts>', arquivos
 
 
-VERSAO_TIMBRADOR = "2026-09-16"
+VERSAO_TIMBRADOR = "2026-11-03"
 CAMPOS_FICHA = ["empresa", "tipo", "area", "area_nome", "numero", "ano", "codigo", "versao", "estado", "variante",
                 "titulo", "subtitulo", "titulo_curto", "classificacao", "local", "data_emissao",
                 "elaborado_por", "revisado_por", "aprovado_por", "cargo_aprovador", "data_aprovacao", "vigencia",
                 "substitui", "substituido_por", "motivo_obsoleto", "identificacao", "historico",
-                "modelo", "com_assinatura", "envolvidos", "assinatura_formato"]   # modelo: True só nos arquivos de partida dos modelos oficiais
+                "modelo", "com_assinatura", "envolvidos", "assinatura_formato", "assinaturas_previstas",
+                "com_anexos", "anexos_externos", "projeto", "plano", "rodadas"]   # modelo: True só nos arquivos de partida dos modelos oficiais
 
 # Campos de um arquivo de partida que NÃO passam para o documento escrito a partir dele.
 CAMPOS_SO_DO_MODELO = ("modelo", "codigo", "numero", "ano", "versao", "estado", "titulo", "subtitulo", "titulo_curto",
@@ -1703,7 +1879,7 @@ def ler_timbrado(caminho, pasta_midia=None):
         spec["titulo"], spec["subtitulo"] = campos_controle["Título"].split(" – ", 1)
     if hist and not spec.get("historico"):
         spec["historico"] = hist
-    spec["corpo"] = corpo
+    spec["corpo"] = extrair_anexos(corpo)     # a seção Anexos é refeita a partir da lista da ficha
     if info["origem"] == "sem_timbrado":
         info["avisos"].append("Não é um documento do padrão: conteúdo lido como documento novo.")
     if spec.get("codigo") is None and spec.get("tipo"):
@@ -1853,8 +2029,16 @@ def registro_de(spec, arquivo):
            "ano": spec.get("ano"), "versao": spec.get("versao"), "estado": spec.get("estado"),
            "data": spec.get("data_aprovacao") or spec.get("data_emissao"),
            "responsavel": spec.get("elaborado_por", ""), "arquivo": os.path.basename(arquivo)}
-    if spec.get("substituido_por"):
+    if spec.get("substituido_por") and spec.get("estado") == "OBSOLETO":   # só vale para obsoleto
         reg["substituido_por"] = spec["substituido_por"]
+    if spec.get("projeto"):
+        reg["projeto"] = spec["projeto"]
+    if spec.get("tipo") == "REL" and spec.get("rodadas"):   # relatório de condução: plano e impressão digital das rodadas
+        reg["plano"] = spec.get("plano")
+        reg["rodadas_sha256"] = digitais_rodadas(spec["rodadas"])
+        fim = encerramento_rel(spec["rodadas"])
+        if fim:
+            reg["encerrado_por"] = fim.get("termo")
     return reg
 
 
@@ -1866,6 +2050,300 @@ def gravar_lista(caminho, registro):
     os.makedirs(pasta, exist_ok=True)
     open(alvo, "w", encoding="utf8").write(json.dumps(lista, ensure_ascii=False, indent=2) + "\n")
     return lista
+
+
+# ----------------------------------------------------------------------------- relatório de condução (REL)
+# Relatório de condução de projeto. Um relatório por projeto, com o número do plano (herdado, não
+# reservado). Só recebe linhas novas: cada rodada é uma versão oficial nova (1.1, 1.2…), publicada pela coordenação
+# sem passar por em aprovação e sem cópia obsoleta. A lista mestra guarda o SHA-256 de cada rodada publicada, e a
+# rodada nova é recusada se uma linha antiga mudou. As rodadas ficam na ficha ("rodadas"); o Quadro de rodadas do
+# corpo é refeito a partir delas (e criado no fim do corpo, se faltar). Mesmas regras na página.
+EVENTOS_REL = {"abertura": "", "rodada": "", "replanejamento": "Replanejamento", "parada": "Parada declarada",
+               "retomada": "Retomada", "correcao": "Correção", "encerramento": "Encerramento"}
+CAB_RODADAS = ["Nº", "Data", "O que se fez", "Compromisso seguinte (o quê · quem · até)", "Avanço"]
+NOTA_RODADAS = "Só se acrescentam linhas. Rodada publicada não se reescreve; correção entra como rodada nova, citando a corrigida."
+SITUACOES_REL = ("concluído", "cancelado")
+SEM_AVANCO_PARADA = 3   # rodadas seguidas sem avanço que permitem declarar a parada do projeto
+
+
+def _limpo(t):
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFC", "" if t is None else str(t))).strip()
+
+
+def celulas_rodada(r):
+    """As cinco células da linha no Quadro de rodadas. É este texto que a impressão digital protege."""
+    tipo = r.get("tipo") or "rodada"
+    if tipo == "replanejamento":
+        pre = f'Replanejamento: plano passa à v{re.sub(r"^[vV]", "", _limpo(r.get("plano_versao")))}.'
+    elif tipo == "correcao":
+        pre = f'Correção da rodada {_limpo(r.get("corrige"))}:'
+    elif tipo == "encerramento":
+        pre = f'Encerramento ({_limpo(r.get("situacao"))}), com o termo {_limpo(r.get("termo"))}.'
+    else:
+        pre = EVENTOS_REL[tipo] + ":" if EVENTOS_REL.get(tipo) else ""
+    c = r.get("compromisso") or {}
+    comp = " · ".join(p for p in (_limpo(c.get("oque")), _limpo(c.get("quem")),
+                                  "até " + _limpo(c.get("ate")) if _limpo(c.get("ate")) else "") if p) or "—"
+    if r.get("avanco") == "sim":
+        avanco = "Sim"
+    elif r.get("avanco") == "nao":
+        avanco = "Não: " + _limpo(r.get("travou")) + (f'; depende de {_limpo(r.get("depende"))}' if _limpo(r.get("depende")) else "")
+    else:
+        avanco = "—"
+    return [str(int(r.get("n"))), _limpo(r.get("data")), _limpo(f'{pre} {_limpo(r.get("feito"))}'), comp, _limpo(avanco)]
+
+
+def digital_rodada(r):
+    return hashlib.sha256("\n".join(celulas_rodada(r)).encode("utf8")).hexdigest()
+
+
+def digitais_rodadas(rodadas):
+    return [digital_rodada(r) for r in rodadas or []]
+
+
+def encerramento_rel(rodadas):
+    return next((r for r in rodadas or [] if r.get("tipo") == "encerramento"), None)
+
+
+def sem_avanco(rodadas):
+    """Números das últimas rodadas seguidas sem avanço. Correção não conta nem interrompe; os demais eventos interrompem."""
+    seguidas = []
+    for r in reversed(rodadas or []):
+        tipo = r.get("tipo") or "rodada"
+        if tipo == "correcao":
+            continue
+        if tipo != "rodada" or r.get("avanco") != "nao":
+            break
+        seguidas.insert(0, int(r.get("n")))
+    return seguidas
+
+
+def versao_rodada(v):
+    """Versão da rodada seguinte: muda o Y (1.0 → 1.1 → 1.2…)."""
+    x, y = (str(v or "1.0").split("-r")[0].split(".") + ["0"])[:2]
+    return f"{int(x)}.{int(y) + 1}"
+
+
+def _data_ord(d):
+    """dd/mm/aaaa → aaaammdd, para comparar; vazio se não for uma data válida."""
+    m = re.match(r"^(\d{2})/(\d{2})/(\d{4})$", _limpo(d))
+    try:
+        return datetime.date(int(m.group(3)), int(m.group(2)), int(m.group(1))).strftime("%Y%m%d") if m else ""
+    except ValueError:
+        return ""
+
+
+def resumo_rodada(r):
+    tipo = r.get("tipo") or "rodada"
+    txt = {"abertura": "abertura do relatório e início da execução", "rodada": "registro da reunião",
+           "replanejamento": f'replanejamento (plano v{re.sub(r"^[vV]", "", _limpo(r.get("plano_versao")))})',
+           "parada": "parada declarada", "retomada": "retomada",
+           "correcao": f'correção da rodada {_limpo(r.get("corrige"))}',
+           "encerramento": f'encerramento ({_limpo(r.get("situacao"))}), termo {_limpo(r.get("termo"))}'}.get(tipo, tipo)
+    return f'Rodada {r.get("n")}: {txt}.'
+
+
+def conferir_rodada(nova, anteriores):
+    """Erros da rodada nova, conferida contra as já publicadas."""
+    erros = []
+    fim = encerramento_rel(anteriores)
+    if fim:
+        erros.append(f'O relatório foi encerrado na rodada {fim.get("n")} (termo {fim.get("termo")}): não recebe novas rodadas.')
+    tipo = nova.get("tipo") or "rodada"
+    esperado = int(anteriores[-1]["n"]) + 1 if anteriores else 0
+    if tipo not in EVENTOS_REL:
+        erros.append(f"Tipo de registro desconhecido: {tipo}.")
+    if not re.match(r"^\d+$", _limpo(nova.get("n"))) or int(_limpo(nova.get("n"))) != esperado:
+        erros.append(f"A rodada nova é a {esperado}" + (f' (a última publicada é a {anteriores[-1]["n"]}).' if anteriores else ", a abertura."))
+    elif (tipo == "abertura") != (esperado == 0):
+        erros.append("A rodada 0 é a abertura, com o início da execução." if esperado == 0 else "Só a rodada 0 é a abertura.")
+    data = _limpo(nova.get("data"))
+    if not _data_ord(data):
+        erros.append("Informe a data da rodada (dd/mm/aaaa).")
+    elif anteriores and data and _data_ord(data) < _data_ord(anteriores[-1].get("data")):
+        erros.append(f'A data da rodada ({data}) é anterior à da rodada {anteriores[-1]["n"]} ({anteriores[-1].get("data")}).')
+    if not _limpo(nova.get("feito")) and tipo != "encerramento":
+        erros.append("Descreva o que se fez desde a rodada anterior.")
+    c = nova.get("compromisso") or {}
+    if tipo in ("abertura", "rodada", "replanejamento", "retomada") and not all(_limpo(c.get(k)) for k in ("oque", "quem", "ate")):
+        erros.append("Informe o compromisso seguinte: o quê, quem e até quando.")
+    if tipo == "rodada":
+        if nova.get("avanco") not in ("sim", "nao"):
+            erros.append("Diga se houve avanço: sim, ou não com o que travou e de quem depende.")
+        elif nova["avanco"] == "nao" and not (_limpo(nova.get("travou")) and _limpo(nova.get("depende"))):
+            erros.append("Sem avanço: diga o que travou e de quem depende.")
+    if tipo == "correcao" and not any(_limpo(r.get("n")) == _limpo(nova.get("corrige")) for r in anteriores):
+        erros.append("Correção: informe o número da rodada corrigida.")
+    if tipo == "replanejamento" and not re.match(r"^[vV]?\d+\.\d+$", _limpo(nova.get("plano_versao"))):
+        erros.append("Replanejamento: informe a nova versão do plano (ex.: 1.1).")
+    if tipo == "encerramento":
+        if "-TER-" not in _limpo(nova.get("termo")).upper():
+            erros.append("Encerramento: informe o código do termo de encerramento (TER).")
+        if _limpo(nova.get("situacao")) not in SITUACOES_REL:
+            erros.append("Encerramento: diga se o projeto foi concluído ou cancelado.")
+    return erros
+
+
+def _eh_quadro_rodadas(b):
+    return isinstance(b, dict) and b.get("t") == "tabela" and \
+        [str(c).replace("*", "").strip() for c in (b.get("cabecalho") or [])][:3] == CAB_RODADAS[:3]
+
+
+def conferir_quadro_rodadas(corpo, rodadas):
+    """O Quadro de rodadas do corpo ainda diz o que a ficha registrou? Linha mudada no Word é recusada."""
+    q = next((b for b in corpo or [] if _eh_quadro_rodadas(b)), None)
+    if q is None:
+        return []
+    lidas = [[_limpo(str(c).replace("*", "")) for c in l] for l in q.get("linhas") or []]
+    for r, l in zip(rodadas, lidas):
+        if l[:5] != celulas_rodada(r):
+            return [f'A rodada {r.get("n")} foi alterada no Quadro de rodadas do documento. Rodada publicada não se reescreve: '
+                    "volte o texto ao publicado (ou parta da versão vigente) e registre a correção numa rodada nova."]
+    if len(lidas) != len(rodadas):
+        return [f"O Quadro de rodadas tem {len(lidas)} linha(s), mas a ficha registra {len(rodadas)}: linha publicada não se acrescenta nem se apaga à mão."]
+    return []
+
+
+def plano_do_projeto(lista, projeto):
+    return [d for d in lista["documentos"] if d.get("tipo") == "PLN" and d.get("estado") == "OFICIAL" and projeto
+            and _sem_acento(d.get("projeto") or projeto_da_pasta(d.get("pasta"))) == _sem_acento(projeto)]
+
+
+def regras_rel(spec, lista, anterior=None):
+    """Regras próprias do relatório de condução. Acerta código, versão e histórico; devolve (erros, avisos)."""
+    erros, avisos = [], []
+    if spec.get("estado") != "OFICIAL":
+        erros.append("Relatório de condução é oficial pelo ato da coordenação: gere como OFICIAL (não tem minuta nem em aprovação).")
+    if not spec.get("projeto"):
+        erros.append("Relatório de condução é sempre de um projeto: informe o projeto.")
+    if lista is None:
+        erros.append("Relatório de condução precisa da lista mestra (--lista): é nela que se confere o plano oficial e as rodadas publicadas.")
+    if erros:
+        return erros, avisos
+    docs = lista["documentos"]
+    plano = (anterior or {}).get("plano") or spec.get("plano")
+    if not plano:
+        planos = plano_do_projeto(lista, spec["projeto"])
+        if not planos:
+            return [f'O projeto "{spec["projeto"]}" não tem plano (PLN) oficial na lista mestra: o relatório de condução só se abre com o plano já oficial.'], avisos
+        if len(planos) > 1:
+            return [f'O projeto "{spec["projeto"]}" tem mais de um plano oficial na lista ({", ".join(d["codigo"] for d in planos)}): informe "plano".'], avisos
+        plano = planos[0]["codigo"]
+    m = re.match(r"^([A-Z0-9]{2,6})-PLN-([A-Z0-9]{2,6})-(\d{3})$", str(plano))
+    reg_plano = next((d for d in docs if d.get("codigo") == plano), None)
+    if not m:
+        return [f"Plano inválido: {plano}."], avisos
+    if not reg_plano or reg_plano.get("estado") != "OFICIAL":
+        erros.append(f"O plano {plano} não está oficial na lista mestra: o relatório de condução só se abre com o plano já oficial.")
+    codigo = f"{m.group(1)}-REL-{m.group(2)}-{m.group(3)}"
+    if spec.get("codigo") and spec["codigo"] != codigo:
+        erros.append(f'O relatório do plano {plano} é o {codigo}, e não {spec["codigo"]}: o número é herdado do plano.')
+    if str(spec.get("numero") or "").isdigit() and int(spec["numero"]) != int(m.group(3)) or spec.get("area", m.group(2)) != m.group(2):
+        avisos.append(f"Número herdado do plano: o relatório é o {codigo}.")
+    spec.update({"plano": plano, "empresa": m.group(1), "area": m.group(2), "numero": int(m.group(3))})
+    spec.pop("area_nome", None)
+    spec["codigo"] = codigo
+    reg = next((d for d in docs if d.get("codigo") == codigo), None)
+    if reg and reg.get("plano") != plano:
+        erros.append(f'O código {codigo} já é "{reg.get("titulo")}" na lista mestra (v{reg.get("versao")}), que não é o relatório de condução '
+                     f"do plano {plano}. A política reserva esse número ao relatório do plano: resolva o conflito antes de abrir o relatório.")
+    rodadas = list(spec.get("rodadas") or [])
+    ants = list((anterior or {}).get("rodadas") or [])
+    if not rodadas:
+        return erros + ["Relatório de condução sem rodadas: a abertura registra a rodada 0, com o início da execução."], avisos
+    if anterior is None:
+        if reg and reg.get("plano") == plano:
+            erros.append(f'O relatório {codigo} já existe (v{reg.get("versao")}): acrescente a rodada a partir da versão vigente.')
+        if len(rodadas) != 1:
+            erros.append("A abertura do relatório registra só a rodada 0.")
+        spec["versao"] = "1.0"
+        spec["historico"] = [{"versao": "1.0", "data": spec.get("data_aprovacao") or rodadas[0].get("data", ""),
+                              "descricao": "Abertura do relatório: identificação e rodada 0 (início da execução).",
+                              "responsavel": spec.get("aprovado_por", "")}]
+    else:
+        if len(rodadas) != len(ants) + 1:
+            erros.append("Cada versão do relatório acrescenta uma rodada, e só uma.")
+        for a, r in zip(ants, rodadas):
+            if digital_rodada(a) != digital_rodada(r):
+                erros.append(f'A rodada {a.get("n")} mudou: rodada publicada não se reescreve. Corrija numa rodada nova, do tipo correção.')
+                break
+        publicadas = (reg or {}).get("rodadas_sha256") or []
+        if len(publicadas) > len(ants):
+            erros.append(f'O arquivo é a v{anterior.get("versao")}, com {len(ants)} rodada(s), mas a lista mestra já registra {len(publicadas)} '
+                         f'(v{reg.get("versao")}). Acrescente a rodada a partir da versão vigente.')
+        else:
+            for i, (h, a) in enumerate(zip(publicadas, ants)):
+                if h != digital_rodada(a):
+                    erros.append(f'A rodada {a.get("n")} do documento não confere com a registrada na lista mestra (SHA-256 diferente): '
+                                 "rodada publicada não se reescreve. Parta da versão vigente e corrija numa rodada nova, do tipo correção.")
+                    break
+            if reg and len(publicadas) < len(ants) and not erros:
+                avisos.append(f"A lista mestra registrava {len(publicadas)} de {len(ants)} rodada(s); as demais foram conferidas com o documento.")
+        spec["versao"] = versao_rodada(anterior.get("versao"))
+    if rodadas:
+        erros += conferir_rodada(rodadas[-1], rodadas[:-1])
+    spec["data_aprovacao"] = spec.get("data_aprovacao") or rodadas[-1].get("data")
+    seguidas = sem_avanco(rodadas)
+    if len(seguidas) >= SEM_AVANCO_PARADA:
+        avisos.append(f'{len(seguidas)} rodadas seguidas sem avanço ({", ".join(map(str, seguidas))}): a parada pode ser declarada '
+                      "do projeto. Declarar é decisão da coordenação, registrada como rodada.")
+    fim = encerramento_rel(rodadas)
+    if fim:
+        if not next((d for d in docs if d.get("codigo") == fim.get("termo")), None):
+            avisos.append(f'O termo de encerramento {fim.get("termo")} não está na lista mestra: confira o código.')
+        avisos.append(f'Relatório encerrado: não recebe novas rodadas. O termo de encerramento cita o {codigo} v{spec["versao"]}.')
+    return erros, avisos
+
+
+def montar_rel(spec):
+    """Refaz no corpo o Quadro de rodadas (a partir da ficha) e o quadro de encerramento."""
+    corpo = spec.get("corpo") or []
+    i = next((k for k, b in enumerate(corpo) if _eh_quadro_rodadas(b)), None)
+    if i is None:   # corpo sem o quadro (texto próprio, sem partir do exemplo): a seção Rodadas entra no fim
+        corpo += [{"t": "h1", "texto": "Rodadas"}, {"t": "tabela", "tipo": "Quadro", "titulo": "Rodadas do projeto", "cabecalho": list(CAB_RODADAS)}]
+        i = len(corpo) - 1
+    rodadas = spec.get("rodadas") or []
+    corpo[i] = dict(corpo[i], cabecalho=list(CAB_RODADAS), linhas=[celulas_rodada(r) for r in rodadas],
+                    larguras=[0.5, 1.8, 4.0, 3.1, 2.3], titulo=corpo[i].get("titulo") or "Rodadas do projeto", nota=NOTA_RODADAS)
+    fim = encerramento_rel(rodadas)
+    if fim:   # a seção de encerramento deixa de ter o lembrete de preenchimento
+        corpo[:] = [b for b in corpo if not (b.get("t") == "p" and re.match(r"^\[?Preenchido na última rodada", str(b.get("texto", "")).strip()))]
+    for b in corpo:
+        if b.get("t") == "campos" and b.get("itens") and str(b["itens"][0][0]).replace("*", "").strip() == "Termo de encerramento":
+            b["itens"] = [["Termo de encerramento", fim.get("termo") if fim else "—"],
+                          ["Última rodada", f'{fim["n"]}, em {fim.get("data")}' if fim else "—"],
+                          ["Situação", _limpo(fim.get("situacao")).capitalize() if fim else "Em andamento"]]
+        elif b.get("t") == "p" and str(b.get("texto", "")).strip().startswith("[Preenchido na última rodada"):
+            b["texto"] = "Preenchido na última rodada."
+    spec["corpo"] = corpo
+
+
+def preparar_rodada(anterior, rodada, responsavel=None):
+    """Especificação da versão seguinte do relatório de condução: as rodadas publicadas mais a nova."""
+    if anterior.get("tipo") != "REL":
+        raise SystemExit("--rodada é só para o relatório de condução (REL).")
+    if anterior.get("estado") != "OFICIAL":
+        raise SystemExit(f'O relatório recebido está como {anterior.get("estado")}: acrescente a rodada a partir da versão oficial vigente.')
+    ants = list(anterior.get("rodadas") or [])
+    if not ants:
+        raise SystemExit("Este REL não tem rodadas na ficha: não é um relatório de condução aberto pelo Timbrador.")
+    nova = json.loads(json.dumps(anterior))
+    for k in ("codigo", "vigencia", "data_aprovacao", "substitui", "substituido_por", "motivo_obsoleto"):
+        nova.pop(k, None)
+    r = dict(rodada)
+    r.setdefault("tipo", "rodada")
+    r.setdefault("n", int(ants[-1]["n"]) + 1)
+    r.setdefault("data", _hoje())
+    nova["rodadas"] = ants + [r]
+    nova["versao"] = versao_rodada(anterior.get("versao"))
+    nova["estado"] = "OFICIAL"
+    nova["data_emissao"] = nova["data_aprovacao"] = r["data"]
+    if responsavel:
+        nova["aprovado_por"] = responsavel
+    hist = list(anterior.get("historico") or [])
+    hist.append({"versao": nova["versao"], "data": r["data"], "descricao": resumo_rodada(r), "responsavel": nova.get("aprovado_por", "")})
+    nova["historico"] = hist
+    return nova
 
 
 # ----------------------------------------------------------------------------- inventário da pasta
@@ -1946,16 +2424,33 @@ def achar_lista(pasta):
 
 # Pastas puladas por padrão na varredura: o arquivo morto não faz parte do que está em uso.
 # Para inventariar o próprio arquivo morto, aponte --inventariar para ele: a raiz nunca é pulada.
-PASTAS_IGNORADAS = ("obsoletos",)
+# Modelos (arquivos de partida e saídas antigas de conversas) fica fora da varredura. OBSOLETOS é lida, mas só decide
+# a entrada de um código que não tem mais nenhuma versão em uso. Mesmas regras do inventário da página.
+PASTAS_IGNORADAS = ("modelos",)
+
+
+def projeto_da_pasta(pasta):
+    """Projeto de uma pasta registrada: "Projetos/Novo Site/…" → "Novo Site"."""
+    partes = str(pasta or "").replace("\\", "/").split("/")
+    for i, x in enumerate(partes[:-1]):
+        if _sem_acento(x) == "projetos" and partes[i + 1]:
+            return partes[i + 1]
+    return ""
+
+
+def _eh_pasta_obsoletos(rel):
+    return any(p.lower() == "obsoletos" for p in str(rel or "").replace("\\", "/").split("/"))
 
 
 def inventariar(pasta, destino=None, gravar=True, ignorar=()):
     """Varre a pasta dos documentos e monta a lista mestra do que já existe."""
     pasta = os.path.abspath(pasta)
     ignorar = [i.lower() for i in (ignorar or ())] + [i for i in PASTAS_IGNORADAS]
-    achados, ignorados, sem_id, listas, modelos = [], [], [], [], []
+    achados, ignorados, sem_id, listas, modelos, visitadas = [], [], [], [], [], set()
     for raiz, dirs, arquivos in os.walk(pasta):
         dirs[:] = sorted(d for d in dirs if d.lower() not in ignorar and not d.startswith("."))
+        rel_raiz = os.path.relpath(raiz, pasta).replace(os.sep, "/")
+        visitadas.add("" if rel_raiz == "." else rel_raiz)
         for nome in sorted(arquivos):
             if nome == LISTA_ARQUIVO:
                 listas.append(os.path.join(raiz, nome))
@@ -1992,8 +2487,9 @@ def inventariar(pasta, destino=None, gravar=True, ignorar=()):
             spec.setdefault("versao", "1.0")
             spec.setdefault("titulo", os.path.splitext(nome)[0])
             spec["codigo"] = codigo_de(spec)
-            achados.append({"spec": spec, "origem": origem, "rel": rel, "nome": nome,
-                            "pasta": os.path.dirname(rel) or "."})
+            pasta_rel = os.path.dirname(rel).replace(os.sep, "/") or "."
+            achados.append({"spec": spec, "origem": origem, "rel": rel, "nome": nome, "pasta": pasta_rel,
+                            "obsoleta": _eh_pasta_obsoletos(pasta_rel) or spec.get("estado") == "OBSOLETO"})
 
     # uma entrada por código: fica a versão mais alta; as demais viram histórico de arquivos
     if not destino:
@@ -2007,11 +2503,46 @@ def inventariar(pasta, destino=None, gravar=True, ignorar=()):
         chave = a["spec"]["codigo"] if a["spec"].get("numero") else f'{a["spec"]["codigo"]}|{a["nome"]}'
         por_codigo.setdefault(chave, []).append(a)
     lista = carregar_lista(destino or pasta)
-    conflitos, multiplos = [], []
-    for codigo, itens in sorted(por_codigo.items()):
+    conflitos, multiplos, alertas, vistos = [], [], [], set()
+    versao_base = lambda v: str(v or "").split("-r")[0]
+    for chave_grupo, itens in sorted(por_codigo.items()):
+        codigo = chave_grupo.split("|")[0]
         itens.sort(key=lambda x: (_chave_versao(x["spec"].get("versao")),
                                   ORDEM_ESTADO.get(x["spec"].get("estado"), 0)))
-        atual = itens[-1]
+        em_uso = [i for i in itens if not i["obsoleta"]]
+        oficiais = [i for i in em_uso if i["spec"].get("estado") == "OFICIAL"]
+        copias = [i for i in itens if i["obsoleta"]]
+        atual = (oficiais or em_uso or copias)[-1]
+        # oficial cuja versão já tem cópia obsoleta: foi substituída e o arquivo ficou para trás na pasta
+        ja = next((c for c in copias if atual["spec"].get("estado") == "OFICIAL" and
+                   _chave_versao(c["spec"].get("versao")) >= _chave_versao(atual["spec"].get("versao"))), None)
+        if ja:
+            alertas.append(f'{codigo} v{atual["spec"].get("versao")}: o arquivo oficial ainda está em {atual["pasta"]}, mas essa '
+                           f'versão já tem cópia obsoleta em {ja["pasta"]}. Retire o oficial da pasta.')
+            atual = ja
+        rel = atual["spec"].get("tipo") == "REL" and bool(atual["spec"].get("rodadas"))
+        if len(oficiais) > 1 and rel:
+            alertas.append(f'{codigo}: relatório de condução com mais de um arquivo em uso (' +
+                           "; ".join(f'v{o["spec"].get("versao")} em {o["pasta"]}' for o in oficiais) +
+                           f'). A v{oficiais[-1]["spec"].get("versao")} contém as rodadas das anteriores: retire as anteriores da pasta '
+                           "(relatório de condução não tem cópia obsoleta).")
+        elif len(oficiais) > 1:
+            alertas.append(f'{codigo}: mais de uma versão oficial em uso (' +
+                           "; ".join(f'v{o["spec"].get("versao")} em {o["pasta"]}' for o in oficiais) +
+                           "). A anterior precisa ser tornada obsoleta.")
+        if oficiais:
+            ult = oficiais[-1]["spec"].get("versao")
+            for m in em_uso:
+                if m["spec"].get("estado") != "OFICIAL" and _chave_versao(versao_base(m["spec"].get("versao"))) <= _chave_versao(versao_base(ult)):
+                    alertas.append(f'{codigo}: a versão {m["spec"].get("versao")} ({m["spec"].get("estado")}, em {m["pasta"]}) é de uma '
+                                   f'versão já publicada (v{ult}) e pode sair da pasta.')
+        for c in copias:
+            if not _eh_pasta_obsoletos(c["pasta"]):
+                alertas.append(f'{c["nome"]}: cópia obsoleta fora da pasta OBSOLETOS (está em {c["pasta"]}).')
+        for m in em_uso:
+            pj = m["spec"].get("projeto")
+            if pj and _sem_acento(projeto_da_pasta(m["pasta"])) != _sem_acento(pj):
+                alertas.append(f'{m["nome"]}: é do projeto "{pj}", mas está em {m["pasta"]}. Documento de projeto fica em Projetos/{pj}.')
         titulos = {_sem_acento(i["spec"].get("titulo")) for i in itens if i["spec"].get("titulo")}
         if len(titulos) > 1:
             conflitos.append((codigo, sorted({i["spec"].get("titulo", "") for i in itens})))
@@ -2021,16 +2552,39 @@ def inventariar(pasta, destino=None, gravar=True, ignorar=()):
         reg = registro_de(spec, atual["nome"])
         reg["pasta"] = atual["pasta"]
         reg["origem"] = atual["origem"]
+        if not reg.get("projeto") and projeto_da_pasta(atual["pasta"]):   # documento antigo, sem o campo na ficha
+            reg["projeto"] = projeto_da_pasta(atual["pasta"])
         if len(itens) > 1:
             reg["arquivos"] = len(itens)
+        if spec.get("tipo") == "REL":
+            alertas += _alertas_rel(codigo, spec, em_uso, lista, reg)
         lista = _mesclar_em(lista, reg)
+        vistos.add(chave_registro(reg))
+    # entradas sem arquivo: saem quando a pasta registrada foi varrida (ou é a de Modelos); fora disso, ficam e são avisadas
+    removidas, nao_conferidas, ficam = [], [], []
+    for d in lista["documentos"]:
+        if chave_registro(d) in vistos:
+            ficam.append(d); continue
+        if "pasta" not in d:
+            nao_conferidas.append(f'{d.get("codigo")} (sem pasta registrada)'); ficam.append(d); continue
+        p = "" if d["pasta"] == "." else str(d["pasta"])
+        if any(x.lower() in PASTAS_IGNORADAS for x in p.split("/")) or p in visitadas:
+            removidas.append(f'{d.get("codigo")} v{d.get("versao")} ({d.get("arquivo") or p})')
+        else:
+            nao_conferidas.append(f'{d.get("codigo")} ({p})'); ficam.append(d)
+    lista["documentos"] = ficam
+    for d in lista["documentos"]:   # relatório de condução: o plano dele tem de estar oficial
+        if d.get("tipo") == "REL" and d.get("plano"):
+            p = next((x for x in lista["documentos"] if x.get("codigo") == d["plano"]), None)
+            if not p or p.get("estado") != "OFICIAL":
+                alertas.append(f'{d["codigo"]}: o plano {d["plano"]} não está oficial na lista mestra.')
     versoes_ruins = sorted({(a["spec"]["codigo"], str(a["spec"].get("versao"))) for a in achados
                             if not RE_VERSAO_OK.match(str(a["spec"].get("versao") or ""))})
     sem_numero = sorted({(a["spec"]["codigo"], a["nome"]) for a in achados if not a["spec"].get("numero")})
     relatorio = {"pasta": pasta, "arquivos_docx": len(achados), "documentos": len(por_codigo),
                  "versoes_fora_do_padrao": versoes_ruins, "sem_numero": sem_numero,
                  "ignorados": ignorados, "modelos": modelos, "sem_identificacao": sem_id, "conflitos": conflitos,
-                 "varias_versoes": multiplos,
+                 "varias_versoes": multiplos, "alertas": alertas, "removidas": removidas, "nao_conferidas": nao_conferidas,
                  "por_origem": {o: sum(1 for a in achados if a["origem"] == o) for o in ("ficha", "cabecalho", "nome")},
                  "por_tipo": {}, "por_estado": {}, "listas_encontradas": listas}
     for a in achados:
@@ -2042,6 +2596,30 @@ def inventariar(pasta, destino=None, gravar=True, ignorar=()):
         open(alvo, "w", encoding="utf8").write(json.dumps(lista, ensure_ascii=False, indent=2) + "\n")
         relatorio["arquivo"] = alvo
     return lista, relatorio
+
+
+def _alertas_rel(codigo, spec, em_uso, lista, reg):
+    """Inventário do relatório de condução: as rodadas do arquivo conferem com as registradas na lista e com as das
+    versões anteriores ainda na pasta? Rodada que não confere não passa para a lista: ela mantém as registradas."""
+    if not spec.get("rodadas"):
+        return []      # relatório comum: não é de condução
+    alertas = []
+    hs = digitais_rodadas(spec["rodadas"])
+    antes = next((d for d in lista["documentos"] if chave_registro(d) == chave_registro(reg)), None)
+    pub = (antes or {}).get("rodadas_sha256") or []
+    if len(pub) > len(hs):
+        alertas.append(f'{codigo}: a lista mestra registra {len(pub)} rodada(s), mas o arquivo mais recente na pasta (v{spec.get("versao")}) tem {len(hs)}. '
+                       "A versão vigente sumiu da pasta?")
+        reg["rodadas_sha256"] = pub
+    elif hs[:len(pub)] != pub:
+        alertas.append(f'{codigo} v{spec.get("versao")}: as rodadas não conferem com as registradas na lista mestra (rodada publicada alterada). '
+                       "A lista mantém as rodadas registradas.")
+        reg["rodadas_sha256"] = pub
+    for m in em_uso:
+        r2 = m["spec"].get("rodadas") or []
+        if m["spec"] is not spec and digitais_rodadas(r2) != hs[:len(r2)]:
+            alertas.append(f'{m["nome"]}: as rodadas desta versão não conferem com as da v{spec.get("versao")} (rodada publicada alterada).')
+    return alertas
 
 
 def _mesclar_em(lista, registro):
@@ -2130,8 +2708,29 @@ def obsoleto_da_anterior(anterior, nova):
     return velha
 
 
-def gerar(spec, ativos, saida):
+def gerar(spec, ativos, saida, anexos=None):
     avisos = validar(spec)
+    if spec.get("tipo") == "REL" and spec.get("rodadas"):
+        montar_rel(spec)
+    if spec.get("estado") != "OBSOLETO":
+        av = adiar_assinaturas(spec)
+        if av: avisos.append(av)
+    # "anexos_externos": arquivos (caminhos) a anexar, ou a lista registrada na ficha. Não confundir com "anexos",
+    # os anexos ABNT dentro do documento longo.
+    arquivos_anexos = list(anexos or []) + [x for x in spec.get("anexos_externos") or [] if isinstance(x, str)]
+    spec["anexos_externos"] = [x for x in spec.get("anexos_externos") or [] if isinstance(x, dict)]
+    if not spec["anexos_externos"]: spec.pop("anexos_externos")
+    if spec.get("com_anexos") or arquivos_anexos:
+        if spec.get("estado") != "OBSOLETO":
+            # documento e anexos juntos numa pasta com o código (a própria --saida, se ela já for essa pasta)
+            if saida.lower().endswith(".docx"):
+                pasta_doc = os.path.dirname(os.path.abspath(saida))
+            else:
+                pasta_doc = saida if os.path.basename(os.path.normpath(saida)) == nome_pasta_doc(spec) else os.path.join(saida, nome_pasta_doc(spec))
+                saida = pasta_doc
+            avisos += preparar_anexos(spec, arquivos_anexos, pasta_doc)
+        montar_anexos(spec)
+    spec.pop("anexos_origem", None)
     if not saida.lower().endswith(".docx"):
         os.makedirs(saida, exist_ok=True)
         saida = os.path.join(saida, nome_arquivo(spec))
@@ -2196,6 +2795,9 @@ def main():
     ap.add_argument("--lista", metavar="CAMINHO", help="lista mestra (pasta dos documentos ou o próprio lista-mestra.json): confere o número e registra a publicação")
     ap.add_argument("--obsoletar", metavar="DOCX", help="gera a cópia OBSOLETO de um documento OFICIAL (use o arquivo original, sem alterações)")
     ap.add_argument("--substituido-por", help="com --obsoletar: código e versão que substituem, ex.: 'ABC-CI-ADM-004/2026 v2.0'")
+    ap.add_argument("--anexo", metavar="ARQUIVO", action="append", default=[],
+                    help="anexo externo (pode repetir): documento e anexos vão juntos para uma pasta com o código do documento")
+    ap.add_argument("--rodada", metavar="JSON", help="com --atualizar de um relatório de condução (REL): a rodada a acrescentar")
     ap.add_argument("--json-saida", help="arquivo para gravar a especificação lida/preparada (padrão: tela)")
     a = ap.parse_args()
     global GERAR_PDF
@@ -2230,8 +2832,16 @@ def main():
                   f'{(d.get("titulo") or "")[:46]:<46} {d.get("pasta", "."):<10} {d.get("responsavel") or "-"}')
         print("\n  (* dados lidos do cabeçalho ou do nome do arquivo: confira título e responsável)" if any(
             d.get("origem") in ("nome", "cabecalho") for d in lista["documentos"]) else "")
+        for al in r["alertas"]:
+            print(f"  ATENÇÃO — {al}")
+        if r["removidas"]:
+            print(f"  Saíram da lista {len(r['removidas'])} entrada(s) cujo arquivo não está mais na pasta:")
+            for x in r["removidas"]:
+                print(f"    {x}")
+        if r["nao_conferidas"]:
+            print(f"  {len(r['nao_conferidas'])} entrada(s) ficaram sem conferir (pasta não varrida): " + "; ".join(r["nao_conferidas"]))
         if r["varias_versoes"]:
-            print(f"  {len(r['varias_versoes'])} documento(s) com mais de um arquivo na pasta (ficou a versão mais alta):")
+            print(f"  {len(r['varias_versoes'])} documento(s) com mais de um arquivo (na lista ficou a versão em uso: a oficial mais alta, quando há):")
             for codigo, vs in r["varias_versoes"][:20]:
                 print(f"    {codigo}: {', '.join(vs)}")
         if r["conflitos"]:
@@ -2265,6 +2875,8 @@ def main():
             raise SystemExit("O arquivo não é um documento do padrão.")
         if velha.get("estado") != "OFICIAL":
             raise SystemExit(f"Só documento OFICIAL pode ser marcado como obsoleto (este está como {velha.get('estado')}).")
+        if velha.get("tipo") == "REL" and velha.get("rodadas"):
+            raise SystemExit("Relatório de condução não tem cópia obsoleta: cada versão nova contém as rodadas da anterior.")
         if not a.substituido_por:
             raise SystemExit("Informe --substituido-por com o código e a versão que substituem este documento.")
         velha.pop("codigo", None)
@@ -2288,11 +2900,25 @@ def main():
             if info["origem"] == "modelo":
                 raise SystemExit("É um arquivo de partida de modelo, não um documento: use --ler e trate como documento novo.")
             anterior = spec
-            spec, av = preparar_atualizacao(anterior, a.mudanca, a.o_que_mudou, a.estado and a.estado.upper(), a.responsavel)
-            avisos += av
+            if anterior.get("tipo") == "REL" and anterior.get("rodadas") or a.rodada:
+                # relatório de condução: só recebe rodadas; a linha mudada no Word é recusada aqui
+                if not a.rodada:
+                    raise SystemExit("Relatório de condução só recebe rodadas: use --atualizar com --rodada rodada.json.")
+                erros = conferir_quadro_rodadas(anterior.get("corpo"), anterior.get("rodadas") or [])
+                if erros:
+                    raise SystemExit(" ".join(erros))
+                spec = preparar_rodada(anterior, json.load(open(a.rodada, encoding="utf8")), a.responsavel)
+                erros = conferir_rodada(spec["rodadas"][-1], spec["rodadas"][:-1])
+                if erros:
+                    raise SystemExit("RODADA: " + " ".join(erros))
+            else:
+                spec, av = preparar_atualizacao(anterior, a.mudanca, a.o_que_mudou, a.estado and a.estado.upper(), a.responsavel)
+                avisos += av
             spec["anterior"] = {k: v for k, v in anterior.items()}
             # impressão digital do bloco "anterior": é dele que sai a cópia obsoleta, que tem de ser igual à vigente
             spec["anterior_conferencia"] = _digital(spec["anterior"])
+            if spec.get("com_anexos"):   # os anexos registrados estão na pasta do documento lido
+                spec["anexos_origem"] = os.path.dirname(os.path.abspath(a.atualizar))
         texto = json.dumps(spec, ensure_ascii=False, indent=2)
         if a.json_saida:
             open(a.json_saida, "w", encoding="utf8").write(texto)
@@ -2305,12 +2931,28 @@ def main():
     if not a.spec:
         ap.error("informe a especificação JSON, --ler ou --atualizar")
     spec = json.load(open(a.spec, encoding="utf8"))
+    # figuras com caminho relativo: a partir da pasta da especificação
+    base_spec = os.path.dirname(os.path.abspath(a.spec))
+    for b in [x for x in spec.get("corpo") or [] if isinstance(x, dict)] + [x for ap_ in (spec.get("apendices") or []) + (spec.get("anexos") or [])
+                                                                          for x in ap_.get("corpo") or [] if isinstance(x, dict)]:
+        if b.get("t") == "figura" and b.get("caminho") and not os.path.isabs(b["caminho"]):
+            b["caminho"] = os.path.join(base_spec, b["caminho"])
     anterior = spec.pop("anterior", None)
     conferencia = spec.pop("anterior_conferencia", None)
     if anterior and conferencia and _digital(anterior) != conferencia:
         raise SystemExit("O bloco \"anterior\" da especificação foi alterado depois do --atualizar. Ele guarda a versão vigente "
                          "e vira a cópia obsoleta, que precisa ser idêntica a ela: refaça o --atualizar e edite só o corpo da nova versão.")
     lista = carregar_lista(a.lista) if a.lista else None
+    rel = str(spec.get("tipo", "")).upper() == "REL" and bool(spec.get("rodadas"))
+    if rel:
+        # relatório de condução: número herdado do plano, oficial pela coordenação, rodadas conferidas com a lista
+        spec["estado"] = str(spec.get("estado", "")).upper()
+        erros = conferir_quadro_rodadas(spec.get("corpo"), anterior.get("rodadas") or []) if anterior else []
+        e2, avisos = regras_rel(spec, lista, anterior)
+        for av in avisos:
+            print("AVISO:", av)
+        if erros + e2:
+            raise SystemExit("RELATÓRIO DE CONDUÇÃO: " + " ".join(erros + e2))
     publica = str(spec.get("estado", "MINUTA")).upper().replace(" ", "_") in ("OFICIAL", "OBSOLETO")
     if lista is not None and not publica:
         # a lista só registra publicações: minuta e em aprovação saem com XXX e não a alteram
@@ -2319,7 +2961,7 @@ def main():
     if lista is not None and str(spec.get("estado", "")).upper() == "OBSOLETO" and _mesmo_codigo(spec.get("substituido_por"), spec):
         print("AVISO: a substituição é nova versão do mesmo código: a entrada da lista continua apontando a vigente.")
         lista = None
-    if lista is not None:
+    if lista is not None and not rel:
         if not spec.get("numero") and not spec.get("codigo"):
             spec["numero"] = proximo_numero(lista, spec)
             print(f"AVISO: número {spec['numero']:03d} reservado na lista mestra.")
@@ -2330,11 +2972,13 @@ def main():
             raise SystemExit("LISTA MESTRA: " + " ".join(erros))
         if not spec.get("elaborado_por"):
             print("AVISO: sem 'elaborado_por': a lista mestra vai registrar a publicação sem responsável.")
-    saida = gerar(spec, ativos, a.saida)
+    saida = gerar(spec, ativos, a.saida, a.anexo)
     if lista is not None:
         lista = gravar_lista(a.lista, registro_de(spec, saida))
         print(f"LISTA MESTRA: {lista_caminho(a.lista)} ({len(lista['documentos'])} documentos)")
-    if anterior and spec["estado"] == "OFICIAL" and anterior.get("estado") == "OFICIAL" and spec.get("gerar_obsoleto_anterior", True):
+    if rel and anterior:
+        print(f'AVISO: relatório de condução não tem cópia obsoleta: retire da pasta a v{anterior.get("versao")}, que a v{spec["versao"]} contém inteira.')
+    elif anterior and spec["estado"] == "OFICIAL" and anterior.get("estado") == "OFICIAL" and spec.get("gerar_obsoleto_anterior", True):
         velha = obsoleto_da_anterior(anterior, spec)
         print("AVISO: gerada também a versão anterior marcada como OBSOLETO (arquive-a e retire de uso).")
         definir_empresa(velha.get("empresa") or ORG["padrao"])

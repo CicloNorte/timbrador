@@ -51,8 +51,9 @@ python3 skills/timbrador/scripts/gerar_documento.py --checar-marca marca.json
 python3 skills/timbrador/scripts/gerar_documento.py --embutir-logos marca.json --saida marca_portatil.json
 python3 skills/timbrador/scripts/gerar_documento.py --ler|--atualizar|--obsoletar DOCX --marca marca.json ...
 python3 skills/timbrador/scripts/gerar_documento.py --inventariar PASTA --marca marca.json [--conferir]
-bash testes/fumaca.sh        # marca, curto/longo, travas, grupo, CPF, ciclo de vida, lista mestra, PDF, XML
-bash testes/pagina.sh        # página × gerador e editor da marca, pacote parte a parte (precisa de node + jsdom; pula sem eles)
+bash testes/fumaca.sh        # marca, curto/longo, travas, grupo, CPF, assinaturas previstas, ciclo de vida, projeto, anexos, lista mestra, inventário, relatório de condução, PDF, XML
+bash testes/pagina.sh        # página × gerador, editor da marca e relatório de condução lido e continuado pelos dois lados (precisa de node + jsdom; pula sem eles)
+bash testes/inventario.sh    # Inventariar.ps1 × --inventariar: lista mestra e alertas iguais (precisa de pwsh ou TIMBRADOR_PWSH; pula sem ele)
 ```
 
 LibreOffice e `pdftotext` são **opcionais**: com eles o gerador converte para
@@ -120,6 +121,36 @@ sem Cloudflare Access no hostname, qualquer um o baixa.
 5. **Gerador e página andam juntos.** Qualquer mudança de visual, de regra ou de
    formato da marca precisa acontecer nos dois, ou o documento gerado pelo
    Claude deixa de ser igual ao gerado pela página. `testes/pagina.sh` confere.
+6. **Assinatura entra só pela página** (caixa "Com assinatura"). O gerador tira do
+   corpo as assinaturas e guarda os envolvidos como `assinaturas_previstas` na
+   ficha (`adiar_assinaturas`; na página, `adiarAssinaturas`, que o teste usa para
+   seguir o caminho do gerador).
+
+## Recursos restaurados e relatório de condução (03/11/2026)
+
+O PR #3 trouxe o porte de uma versão mais antiga do original. Voltaram, nos dois
+lados, os recursos da versão mais recente: campo `projeto` (ficha, lista mestra,
+pasta `Projetos/Nome`, PLN exige projeto), anexos externos com SHA-256 (`--anexo`;
+na página, a caixa "Com anexos externos"), assinaturas previstas, inventário que lê
+`Obsoletos` e pula `Modelos` (com alertas e entradas sem arquivo), figuras relativas
+à especificação, rascunho da página no navegador e data da aprovação acompanhando o
+dia. Na página, o campo Projeto substituiu o "Salvar em".
+
+Relatório de condução (REL com rodadas), vindo do PR #2: número herdado do plano
+oficial do projeto, cada rodada é uma versão OFICIAL nova, sem cópia obsoleta, e a
+lista mestra guarda o SHA-256 de cada rodada (`rodadas_sha256`). As mesmas regras
+estão no gerador (`regras_rel`, `celulas_rodada`) e na página (`regrasRel`,
+`celulasRodada`): a impressão digital é calculada sobre o texto das cinco células
+da linha. Corpo sem o Quadro de rodadas ganha a seção "Rodadas" no fim. Na página,
+o modo de condução é opcional para REL novo (caixa "Relatório de condução de
+projeto"); REL sem rodadas é relatório comum.
+
+`Inventariar.ps1` acompanha o `--inventariar` (03/11/2026): lê `Obsoletos` e pula
+`Modelos`, registra `projeto` (da ficha ou da pasta), mescla a entrada antiga, tira da
+lista a entrada cujo arquivo sumiu de pasta varrida, dá os mesmos alertas e calcula o
+SHA-256 das rodadas sobre o mesmo texto das células (`Celulas-Rodada`, espelho de
+`celulas_rodada`). `testes/inventario.sh` compara as duas listas e os alertas, inclusive
+com rodada adulterada; precisa de `pwsh` (ou `TIMBRADOR_PWSH`) e pula sem ele.
 
 ## A página (`pagina/timbrador.html`)
 
@@ -157,7 +188,9 @@ padrão, nome da organização, código da política e tipos extras vêm do
 `marca.json`; ficha `…timbrador:ficha`; siglas `[A-Z0-9]{2,6}`. Lista que já
 existe mantém o `lista_mestra`/`padrao` dela (como o gerador). Testado com
 PowerShell 7.4 no Linux contra `gerar_documento.py --inventariar`: lista mestra
-igual (ficha nova e antiga, cabeçalho, nome, Obsoletos pulado). Os `.cmd` estão
+igual (ficha nova e antiga, cabeçalho, nome). Em 03/11/2026 passou a seguir as
+regras atuais (ver "Recursos restaurados"), conferido com PowerShell 7.4.6 no Linux
+por `testes/inventario.sh`. Os `.cmd` estão
 em CRLF (`.gitattributes`).
 
 **Pendente:** no Chrome real só foram vistos a carga da marca e o editor (sem
@@ -184,6 +217,14 @@ Visual (03/11/2026): regressão sem `visual` idêntica ao gerador anterior (6
 documentos); `testes/pagina.sh` com visual e fontes embutidas (DejaVu Serif do
 sistema); marca mhdn com visual igual página × gerador (25 e 28 partes); PDFs
 com Newsreader e EB Garamond embutidas (LibreOffice usa as fontes do .docx).
+
+Recursos restaurados e relatório (03/11/2026): `fumaca.sh` com 64 verificações
+(assinaturas previstas, projeto, anexos com SHA-256 e anexo alterado recusado,
+inventário com Obsoletos e projeto fora da pasta, 19 casos do relatório de condução);
+`pagina.sh` com o documento de grupo com assinatura e o relatório lido e continuado
+pelos dois lados; interface no Chromium (Playwright): texto colado, Projeto,
+assinatura, anexo, Gerar (zip com documento e anexo), caixa do relatório e rascunho
+recuperado ao recarregar, sem erro de console.
 
 **Não coberto ainda:** as fontes embutidas abertas no Word de verdade, `--obsoletar` e a cópia obsoleta automática, inventário
 gravando, `assinatura_formato` automático trocando para tabela, figuras JPEG grandes, tabelas que quebram entre páginas,
