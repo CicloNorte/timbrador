@@ -93,4 +93,29 @@ vig() { ls "$rel/docs"/ACME-REL-ECO-001_v*_OFICIAL_*.docx | sort -V | tail -1; }
   && python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d['versao']=='1.3' and len(d['rodadas'])==4 else 1)" "$rel/v13.json" \
   && echo "  ok    relatório de condução: página e gerador leem e acrescentam rodadas um do outro" \
   || { echo "  FALHA relatório de condução página × gerador"; sed 's/^/        /' "$saida/.log"; falhas=$((falhas + 1)); }
+# prévia em PDF (botão Visualizar): o núcleo da página desenha cada documento; o PDF tem de ser válido (xref no lugar
+# certo, uma página por /Page) e trazer o código, a paginação "Página X de Y" e o título
+python3 - "$raiz/testes/espec-rel.json" "$saida/rel-numerado.json" <<'PY4'
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8")); d["numero"] = 1      # na página, o número vem da lista mestra
+json.dump(d, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)
+PY4
+if node "$raiz/testes/pagina_previa.js" "$saida/marca.json" "$saida/previa" "${specs[@]}" "$saida/rel-numerado.json" > "$saida/.log" 2>&1; then
+  for f in "$saida"/previa/*.pdf; do
+    if python3 - "$f" > "$saida/.log" 2>&1 <<'PY5'
+import re, sys, shutil, subprocess
+d = open(sys.argv[1], "rb").read()
+assert d.startswith(b"%PDF-1.4") and d.rstrip().endswith(b"%%EOF"), "cabeçalho ou fim do PDF"
+xref = int(re.search(rb"startxref\s+(\d+)", d).group(1)); assert d[xref:xref + 4] == b"xref", "startxref fora do lugar"
+n = len(re.findall(rb"/Type /Page\b", d)); assert n >= 1, "sem páginas"
+if shutil.which("pdftotext"):
+    txt = subprocess.run(["pdftotext", "-layout", sys.argv[1], "-"], capture_output=True, text=True, check=True).stdout
+    assert f"Página {n} de {n}" in txt, f"paginação ({n} páginas)"
+    assert re.search(r"(ACME|GTESTE)-[A-Z]{2,3}-[A-Z]{2,3}-", txt), "código do documento"
+print(n)
+PY5
+    then echo "  ok    prévia em PDF: $(basename "$f") ($(cat "$saida/.log") pág.)"
+    else echo "  FALHA prévia em PDF: $(basename "$f")"; sed 's/^/        /' "$saida/.log"; falhas=$((falhas + 1)); fi
+  done
+else echo "  FALHA prévia em PDF não gerou"; sed 's/^/        /' "$saida/.log"; falhas=$((falhas + 1)); fi
 exit $falhas

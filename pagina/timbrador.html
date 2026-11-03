@@ -132,6 +132,21 @@
   .em-flags label.check { margin-top:10px; }
   @media (max-width:480px) { .checks { grid-template-columns:1fr; } .em-nova { grid-template-columns:1fr 1fr; } }
   footer { text-align:center; color:var(--suave); font-size:12px; margin-top:14px; }
+  /* A borda do formulário tem a cor do estado escolhido, a mesma da faixa do documento. */
+  body:not(.sem-marca):not(.editando) .cartao { border:3px solid var(--estado, var(--linha)); transition:border-color .2s; }
+  .acoes { display:flex; gap:10px; margin-top:26px; }
+  .acoes button { margin-top:0; }
+  button.secundario { width:auto; flex:none; padding:14px 18px; color:var(--cor); background:var(--cartao); border:1px solid var(--cor); }
+  /* Prévia: o PDF ocupa a metade direita da tela e o formulário passa para o meio da metade esquerda. */
+  main { transition:margin .25s ease; }
+  body.com-previa main { margin-left:max(16px, calc(25vw - 280px)); margin-right:0; max-width:min(560px, calc(50vw - 32px)); }
+  #previa { position:fixed; top:0; right:0; bottom:0; width:50vw; display:flex; flex-direction:column; background:var(--cartao); border-left:1px solid var(--linha); box-shadow:-6px 0 24px rgba(0,0,0,.08); z-index:40; }
+  .previa-topo { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--linha); font-size:14px; }
+  #previa-estado { flex:1; color:var(--suave); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #previa-aviso:not(:empty) { padding:8px 14px; font-size:13px; color:#8a6a00; background:#fdf8ec; border-bottom:1px solid var(--linha); }
+  #previa-aviso ul { margin:4px 0 0; padding-left:18px; }
+  #previa-quadro { flex:1; width:100%; border:0; background:#e9e9ec; }
+  @media (max-width:900px) { #previa { width:100vw; } body.com-previa main { max-width:560px; margin:40px auto; } }
   @media (max-width:480px) { .grade, .rel-grade3, .rel-grade-comp { grid-template-columns:1fr; } .rel-rodadas { font-size:11px; } .cartao { padding:20px; } }
 </style>
 </head>
@@ -344,12 +359,17 @@
       </div>
     </details>
 
-    <button id="gerar" disabled>Gerar documento timbrado</button>
+    <div class="acoes"><button type="button" class="secundario" id="visualizar" disabled>Visualizar</button><button id="gerar" disabled>Gerar documento timbrado</button></div>
     </div>
     <div class="msg" id="msg" aria-live="polite"></div>
   </div>
   <footer>O arquivo é processado no seu computador; nada é enviado para a internet.<br><span id="rodape-padrao"></span></footer>
 </main>
+<aside id="previa" hidden aria-label="Prévia do documento">
+  <div class="previa-topo"><strong>Prévia em PDF</strong><span id="previa-estado"></span><button type="button" class="acao" id="previa-atualizar">Atualizar</button><button type="button" class="acao" id="previa-fechar">Fechar</button></div>
+  <div id="previa-aviso"></div>
+  <iframe id="previa-quadro" title="Prévia do documento em PDF"></iframe>
+</aside>
 <script id="nucleo">
 "use strict";
 /* ======================================================================= dados do padrão
@@ -2325,6 +2345,691 @@ function organizar(itens) {
 }
 </script>
 
+<script id="pdf">
+"use strict";
+/* ======================================================================= prévia em PDF
+   O botão Visualizar mostra o documento em PDF, desenhado aqui mesmo, sem biblioteca e sem mandar nada para fora.
+   O desenho segue as medidas do .docx (montar): faixa e bloco de controle, borda, marca d'água, rodapé com o logo,
+   capa, folha de controle e sumário, que aqui já sai com as páginas. É prévia: a quebra de linha usa as métricas da
+   Helvetica (a Arial do PDF), e a paginação pode diferir um pouco da do Word. O documento que vale é o .docx. */
+const PT_CM = 72 / 2.54, PAG_L = 595.28, PAG_A = 841.89;
+// Larguras (milésimos do corpo) dos códigos 32 a 255 da WinAnsiEncoding, tiradas das métricas AFM da Helvetica.
+const HELV = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584,350,556,350,222,556,333,1000,556,556,333,1000,667,333,1000,350,611,350,350,222,222,333,333,350,556,1000,333,1000,500,333,944,350,500,667,278,333,556,556,556,556,260,556,333,737,370,556,584,333,737,333,400,584,333,333,333,556,537,278,333,333,365,556,834,834,834,611,667,667,667,667,667,667,1000,722,667,667,667,667,278,278,278,278,722,722,778,778,778,778,778,584,778,722,722,722,722,667,667,611,556,556,556,556,556,556,889,500,556,556,556,556,278,278,278,278,556,556,556,556,556,556,556,584,611,556,556,556,556,500,556,500];
+const HELV_N = [278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584,350,556,350,278,556,500,1000,556,556,333,1000,667,333,1000,350,611,350,350,278,278,500,500,350,556,1000,333,1000,556,333,944,350,500,667,278,333,556,556,556,556,280,556,333,737,370,556,584,333,737,333,400,584,333,333,333,611,556,278,333,333,365,556,834,834,834,611,722,722,722,722,722,722,1000,722,667,667,667,667,278,278,278,278,722,722,778,778,778,778,778,584,778,722,722,722,722,667,667,611,556,556,556,556,556,556,889,556,556,556,556,556,278,278,278,278,611,611,611,611,611,611,611,584,611,611,611,611,611,556,611,556];
+const ALT_LINHA = 1.15, DESC = 0.212;   // linha simples e descendente da Arial, em corpos
+const WIN_ANSI = { 0x20AC: 0x80, 0x201A: 0x82, 0x0192: 0x83, 0x201E: 0x84, 0x2026: 0x85, 0x2020: 0x86, 0x2021: 0x87, 0x02C6: 0x88, 0x2030: 0x89,
+  0x0160: 0x8A, 0x2039: 0x8B, 0x0152: 0x8C, 0x017D: 0x8E, 0x2018: 0x91, 0x2019: 0x92, 0x201C: 0x93, 0x201D: 0x94, 0x2022: 0x95, 0x2013: 0x96,
+  0x2014: 0x97, 0x02DC: 0x98, 0x2122: 0x99, 0x0161: 0x9A, 0x203A: 0x9B, 0x0153: 0x9C, 0x017E: 0x9E, 0x0178: 0x9F };
+// texto → códigos WinAnsi; o que a codificação não tem sai como "?"
+function codigosPdf(t) {
+  const out = [];
+  for (const ch of String(t).normalize("NFC")) {
+    const u = ch.codePointAt(0);
+    if (u === 9 || u === 10 || u === 13 || u === 0xA0) out.push(32);
+    else if ((u >= 32 && u < 127) || (u >= 0xA1 && u <= 0xFF)) out.push(u);
+    else if (WIN_ANSI[u]) out.push(WIN_ANSI[u]);
+    else if (u >= 0x2010 && u <= 0x2012) out.push(45);
+    else out.push(63);
+  }
+  return out;
+}
+const largCodigos = (cs, k) => (k.mono ? cs.length * 600 : cs.reduce((s, c) => s + (k.b ? HELV_N : HELV)[c - 32], 0)) * k.sz / 1000 + (k.esp || 0) * cs.length;
+const numPdf = v => String(Math.round(v * 100) / 100);
+const corPdf = hex => { const h = String(hex || "000000").replace("#", ""); return [0, 2, 4].map(i => numPdf(parseInt(h.substr(i, 2), 16) / 255)).join(" "); };
+const textoPdf = cs => cs.map(c => c === 40 || c === 41 || c === 92 ? "\\" + String.fromCharCode(c) : c < 32 || c > 126 ? "\\" + c.toString(8).padStart(3, "0") : String.fromCharCode(c)).join("");
+const fontePdf = k => k.mono ? "F5" : "F" + (1 + (k.b ? 1 : 0) + (k.i ? 2 : 0));
+
+// Uma página: operações de desenho em coordenadas do papel (pontos, origem no alto à esquerda). Função na lista é
+// resolvida só no fim, quando já se sabe o total de páginas e a página de cada título.
+class PaginaPdf {
+  constructor(indice, secao) { this.indice = indice; this.secao = secao; this.ops = []; }
+  texto(cs, k, x, y) {
+    if (cs.length) this.ops.push(`BT /${fontePdf(k)} ${numPdf(k.sz)} Tf ${corPdf(k.cor)} rg ${numPdf(k.esp || 0)} Tc ${numPdf(x)} ${numPdf(PAG_A - y)} Td (${textoPdf(cs)}) Tj ET`);
+  }
+  retangulo(x, y, w, h, cor) { this.ops.push(`${corPdf(cor)} rg ${numPdf(x)} ${numPdf(PAG_A - y - h)} ${numPdf(w)} ${numPdf(h)} re f`); }
+  linha(x1, y1, x2, y2, larg, cor) { this.ops.push(`${numPdf(larg)} w ${corPdf(cor)} RG ${numPdf(x1)} ${numPdf(PAG_A - y1)} m ${numPdf(x2)} ${numPdf(PAG_A - y2)} l S`); }
+  imagem(nome, x, y, w, h) { this.ops.push(`q ${numPdf(w)} 0 0 ${numPdf(h)} ${numPdf(x)} ${numPdf(PAG_A - y - h)} cm /${nome} Do Q`); }
+}
+
+/* ------------------------------------------------ parágrafos: estilos, trechos e quebra de linha */
+// Os estilos do estilosXml(), em pontos: corpo, entrelinha (múltiplo da simples), espaço antes e depois, recuo da 1ª linha.
+const EST_PDF = {
+  Normal: { sz: 12, linha: 1.5, antes: 0, depois: 6, recuo: 35.45, jc: "both" },
+  SemRecuo: { sz: 12, linha: 1.5, antes: 0, depois: 6, jc: "both" },
+  Heading: { sz: 12, linha: 1.5, antes: 18, depois: 12, jc: "left", keep: true },
+  TituloSemNumero: { sz: 12, linha: 1.5, antes: 0, depois: 18, jc: "center", keep: true, b: true, caps: true, titulo: true },
+  TituloSumario: { sz: 12, linha: 1.5, antes: 0, depois: 18, jc: "center", keep: true, b: true, caps: true, titulo: true },
+  TituloDocumento: { sz: 13, linha: 1.15, antes: 0, depois: 3, jc: "center", keep: true, b: true, caps: true, titulo: true },
+  Legenda: { sz: 10, linha: 1, antes: 12, depois: 3, jc: "center", keep: true },
+  Fonte: { sz: 10, linha: 1, antes: 3, depois: 12, jc: "left" },
+  TabelaTexto: { sz: 10, linha: 1, antes: 0, depois: 0, jc: "left" },
+  CitacaoLonga: { sz: 10, linha: 1, antes: 12, depois: 18, esq: 113.4, jc: "both" },
+  Nota: { sz: 10, linha: 1, antes: 3, depois: 6, jc: "both" },
+  Referencia: { sz: 12, linha: 1, antes: 0, depois: 12, jc: "left" },
+  Lista: { sz: 12, linha: 1.5, antes: 0, depois: 3, jc: "both" },
+  Rodape: { sz: 8, linha: 1, antes: 0, depois: 0, jc: "left" },
+  TOC: { sz: 12, linha: 1.15, antes: 0, depois: 3, jc: "left" }
+};
+const ESTILO_TITULO = ["b caps", "caps", "b", "b i", "i"];
+// mesmo recorte do inline(): ***negrito e itálico***, **negrito**, *itálico*
+function trechosPdf(texto, k = {}) {
+  return String(texto).split(/(\*\*\*.+?\*\*\*|\*\*.+?\*\*|\*[^*\s][^*]*?\*)/).filter(Boolean).map(tok => {
+    if (tok.startsWith("***") && tok.endsWith("***") && tok.length > 6) return { t: tok.slice(3, -3), k: { ...k, b: true, i: true } };
+    if (tok.startsWith("**") && tok.endsWith("**")) return { t: tok.slice(2, -2), k: { ...k, b: true } };
+    if (tok.startsWith("*") && tok.endsWith("*") && tok.length > 2) return { t: tok.slice(1, -1), k: { ...k, i: true } };
+    return { t: tok, k };
+  });
+}
+// Parágrafo no estilo dado: trechos já com corpo, cor, negrito e caixa alta do estilo; o (opções) troca o resto.
+function parPdf(estilo, trechos, o = {}) {
+  const e = { ...EST_PDF[estilo] }, base = { sz: e.sz, cor: e.titulo && VISUAL.cor_titulo ? VISUAL.cor_titulo : corTexto() };
+  if (e.b) base.b = true;
+  if (e.i) base.i = true;
+  if (e.caps) base.caps = true;
+  if (o.estiloTexto) for (const f of o.estiloTexto.split(" ")) base[f] = true;
+  const P = { esq: 0, dir: 0, recuo: 0, ...e, ...o };
+  P.k = base;
+  P.trechos = (trechos || []).map(tr => ({ t: tr.t, k: { ...base, ...tr.k } }));
+  return P;
+}
+const tr = (t, k = {}) => ({ t, k });
+// Palavras (sem espaço; podem trocar de estilo no meio) e linhas, com quebra gulosa; palavra maior que a linha é cortada.
+function linhasPdf(P, larg) {
+  const pals = [];
+  let atual = null, esp = 0;
+  for (const { t, k } of P.trechos) {
+    const txt = k.caps ? String(t).toUpperCase() : String(t);
+    for (const pedaco of txt.split(/([ \t\n\r ]+)/)) {
+      if (!pedaco) continue;
+      if (/^[ \t\n\r ]+$/.test(pedaco)) { if (atual) { pals.push(atual); atual = null; } esp = largCodigos([32], k); continue; }
+      const cs = codigosPdf(pedaco), w = largCodigos(cs, k);
+      if (!atual) { atual = { frags: [], w: 0, esp }; esp = 0; }
+      atual.frags.push({ cs, k, w }); atual.w += w;
+    }
+  }
+  if (atual) pals.push(atual);
+  const linhas = [];
+  let lin = { pals: [], w: 0 }, lim = larg - P.esq - P.dir - P.recuo;
+  const fechar = () => { linhas.push(lin); lin = { pals: [], w: 0 }; lim = larg - P.esq - P.dir; };
+  for (let p of pals) {
+    if (lin.pals.length && lin.w + p.esp + p.w > lim + 0.01) fechar();
+    while (!lin.pals.length && p.w > lim + 0.01) {      // palavra que não cabe nem sozinha: corta por caractere
+      const cabe = { frags: [], w: 0, esp: 0 }, resto = { frags: [], w: 0, esp: 0 };
+      for (const f of p.frags) {
+        let i = 0;
+        while (i < f.cs.length && cabe.w + largCodigos(f.cs.slice(0, i + 1), f.k) <= lim && !resto.frags.length) i++;
+        if (i === 0 && !cabe.frags.length) i = 1;
+        if (i) { const cs = f.cs.slice(0, i), w = largCodigos(cs, f.k); cabe.frags.push({ cs, k: f.k, w }); cabe.w += w; }
+        if (i < f.cs.length) { const cs = f.cs.slice(i), w = largCodigos(cs, f.k); resto.frags.push({ cs, k: f.k, w }); resto.w += w; }
+      }
+      lin.pals.push(cabe); lin.w = cabe.w; fechar();
+      p = resto;
+      if (!p.frags.length) break;
+    }
+    if (!p.frags.length) continue;
+    lin.w += lin.pals.length ? p.esp + p.w : p.w; lin.pals.push(p);
+  }
+  linhas.push(lin);
+  for (const l of linhas) {
+    const sz = Math.max(P.k.sz, ...l.pals.flatMap(p => p.frags.map(f => f.k.sz)));
+    l.h = P.linha * ALT_LINHA * sz;
+    l.base = l.h - DESC * sz;
+  }
+  return linhas;
+}
+// Parágrafo medido: as linhas (cada uma desenhável sozinha, para a paginação) e as bordas do parágrafo.
+function medirPar(P, larg) {
+  const linhas = linhasPdf(P, larg), bt = P.bordaTopo, bb = P.bordaBase;
+  const topo = bt ? bt.w + bt.esp : 0, base = bb ? bb.w + bb.esp : 0;
+  const rows = linhas.map((lin, i) => ({
+    h: lin.h + (i === 0 ? topo : 0) + (i === linhas.length - 1 ? base : 0),
+    desenhar: (pg, x0, y) => {
+      if (i === 0 && bt) pg.linha(x0 + P.esq, y + bt.w / 2, x0 + larg - P.dir, y + bt.w / 2, bt.w, bt.cor);
+      const yl = y + (i === 0 ? topo : 0);
+      desenharLinhaPdf(pg, P, lin, x0, yl, larg, i === linhas.length - 1, i === 0);
+      if (P.bordaEsq) { const be = P.bordaEsq, xb = x0 + P.esq - be.esp - be.w / 2; pg.linha(xb, y, xb, y + lin.h + (i === 0 ? topo : 0), be.w, be.cor); }
+      if (i === linhas.length - 1 && bb) { const yb = yl + lin.h + bb.esp + bb.w / 2; pg.linha(x0 + P.esq, yb, x0 + larg - P.dir, yb, bb.w, bb.cor); }
+    }
+  }));
+  return { P, rows, antes: P.antes, depois: P.depois, h: rows.reduce((s, r) => s + r.h, 0) };
+}
+function desenharLinhaPdf(pg, P, lin, x0, y, larg, ultima, primeira) {
+  const disp = larg - P.esq - P.dir - (primeira ? P.recuo : 0);
+  let x = x0 + P.esq + (primeira ? P.recuo : 0), gap = 0;
+  const sobra = disp - lin.w;
+  if (P.jc === "center") x += sobra / 2;
+  else if (P.jc === "right") x += sobra;
+  else if (P.jc === "both" && !ultima && lin.pals.length > 1) gap = sobra / (lin.pals.length - 1);
+  if (primeira && P.marcador) desenharMarcador(pg, P.marcador, x0 + P.esq - P.marcador.recuo, y + lin.base, lin.h);
+  lin.pals.forEach((p, i) => {
+    if (i) x += p.esp + gap;
+    for (const f of p.frags) { pg.texto(f.cs, f.k, x, y + lin.base); x += f.w; }
+  });
+  if (P.toc && ultima) {      // sumário: pontilhado e número da página, resolvidos no fim
+    const xf = x0 + larg, k = P.k, ref = P.toc.ref, yb = y + lin.base, xi = x;
+    pg.ops.push(() => {
+      const num = codigosPdf(String(ref.pagina || "")), wn = largCodigos(num, k), pt = largCodigos([46], k);
+      const n = Math.max(0, Math.floor((xf - wn - xi - 4) / pt));
+      const p2 = new PaginaPdf(0, "");
+      p2.texto(codigosPdf(".".repeat(n)), { ...k, b: false, caps: false }, xf - wn - 2 - n * pt, yb);
+      p2.texto(num, k, xf - wn, yb);
+      return p2.ops.join("\n");
+    });
+  }
+}
+function desenharMarcador(pg, m, x, yb, h) {
+  if (m.caixa) {   // ☐ do checklist (não existe na WinAnsi): um quadrado do tamanho da letra
+    const l = m.k.sz * 0.62;
+    for (const [a, b, c, d] of [[0, 0, l, 0], [l, 0, l, l], [l, l, 0, l], [0, l, 0, 0]]) pg.linha(x + a, yb - l + b + 0.4, x + c, yb - l + d + 0.4, 0.6, m.k.cor);
+  } else pg.texto(codigosPdf(m.texto), m.k, x, yb);
+}
+
+/* ------------------------------------------------ tabelas */
+// def: { larguras: [pt], x: deslocamento, margens: {t,b,l,r}, bordas: {topo, base, esq, dir, h, v} ({w, cor} ou nada),
+//        linhas: [{ celulas: [{ pars: [P], fundo, bordaBase, valinhar }], altura, exata, cabeca }] }
+function tabelaPdf(def) {
+  const m = { t: 0, b: 0, l: 5.4, r: 5.4, ...(def.margens || {}) }, B = def.bordas || {};
+  const xs = [0]; for (const w of def.larguras) xs.push(xs[xs.length - 1] + w);
+  const rows = def.linhas.map(lin => {
+    const cels = lin.celulas.map((c, i) => {
+      const larg = def.larguras[i] - m.l - m.r;
+      const ms = (c.pars || []).map(P => medirPar(P, larg));
+      let h = 0, dep = 0;
+      ms.forEach((x, k) => { h += (k ? Math.max(dep, x.antes) : x.antes) + x.h; dep = x.depois; });
+      h += dep;
+      return { c, ms, h, larg };
+    });
+    const conteudo = Math.max(0, ...cels.map(c => c.h)) + m.t + m.b;
+    const h = lin.exata ? lin.altura : Math.max(conteudo, lin.altura || 0);
+    return {
+      h, cabeca: !!lin.cabeca,
+      desenhar: (pg, x0, y, f) => {
+        const x = x0 + (def.x || 0);
+        cels.forEach((cel, i) => {
+          if (cel.c.fundo) pg.retangulo(x + xs[i], y, def.larguras[i], h, cel.c.fundo);
+          const va = cel.c.valinhar || "top";
+          let yc = y + m.t + (va === "center" ? (h - m.t - m.b - cel.h) / 2 : va === "bottom" ? h - m.t - m.b - cel.h : 0), dep = 0;
+          cel.ms.forEach((mp, k) => {
+            yc += k ? Math.max(dep, mp.antes) : mp.antes;
+            for (const r of mp.rows) { r.desenhar(pg, x + xs[i] + m.l, yc); yc += r.h; }
+            dep = mp.depois;
+          });
+          if (cel.c.bordaBase) pg.linha(x + xs[i], y + h, x + xs[i + 1], y + h, cel.c.bordaBase.w, cel.c.bordaBase.cor);
+        });
+        const hor = (yy, b) => b && pg.linha(x, yy, x + xs[xs.length - 1], yy, b.w, b.cor);
+        hor(y, f.primeira ? B.topo : B.h);
+        if (f.ultima) hor(y + h, B.base);
+        xs.forEach((xx, i) => { const b = i === 0 ? B.esq : i === xs.length - 1 ? B.dir : B.v; if (b) pg.linha(x + xx, y, x + xx, y + h, b.w, b.cor); });
+      }
+    };
+  });
+  return { rows, cabeca: def.linhas.filter(l => l.cabeca).length, antes: def.antes || 0, depois: def.depois || 0, inteiro: def.inteiro, keep: def.keep };
+}
+const lPdf = (w, cor = "000000") => ({ w, cor });
+
+/* ------------------------------------------------ blocos de conteúdo (mesmos do blocos() do .docx) */
+const blocoPar = (P, larg, extra = {}) => { const m = medirPar(P, larg); return { rows: m.rows, antes: m.antes, depois: m.depois, keep: !!P.keep, quebra: !!P.quebra, viuvas: true, ...extra }; };
+function tituloPdf(cx, nivel, texto, numerar = true, quebra = false, larg) {
+  let prefixo = "";
+  if (numerar) {
+    cx.sec[nivel - 1]++;
+    for (let k = nivel; k < 5; k++) cx.sec[k] = 0;
+    prefixo = cx.sec.slice(0, nivel).map(n => Math.max(1, n)).join(".") + " ";
+  }
+  const exib = nivel <= 2 ? texto.toUpperCase() : texto, ref = { pagina: 0 };
+  cx.titulos.push([nivel, prefixo + exib, ref]);
+  const P = parPdf("Heading", [tr(prefixo), tr(exib)], { estiloTexto: ESTILO_TITULO[nivel - 1], quebra });
+  if (VISUAL.cor_titulo) P.trechos.forEach(t => { t.k.cor = VISUAL.cor_titulo; });
+  return blocoPar(P, larg, { ref, viuvas: false, inteiro: true });
+}
+function tituloSemNumeroPdf(cx, texto, larg) {
+  const ref = { pagina: 0 };
+  cx.titulos.push([1, texto.toUpperCase(), ref]);
+  return blocoPar(parPdf("TituloSemNumero", [tr(texto)], { quebra: true }), larg, { ref, viuvas: false, inteiro: true });
+}
+const MARCADORES = { alineas: ["a)", "–", "–"], numerada: ["1.", "a)", "–"], marcadores: ["•", "–", "–"], checklist: ["☐", "☐", "–"] };
+function listaPdf(itens, tipo, larg, nivel = 0, out = []) {
+  let n = 0;
+  for (const it of itens || []) {
+    const txt = it && typeof it === "object" ? (it.texto || "") : it, sub = it && typeof it === "object" ? (it.sub || []) : [];
+    n++;
+    const fmt = MARCADORES[tipo][Math.min(nivel, 2)];
+    const texto = fmt === "1." ? `${n}.` : fmt === "a)" ? `${String.fromCharCode(96 + ((n - 1) % 26) + 1)})` : fmt;
+    const esq = [56.7, 78, 99.25][Math.min(nivel, 2)], recuo = [21.25, 21.3, 21.25][Math.min(nivel, 2)];
+    const P = parPdf("Lista", trechosPdf(txt), { esq });
+    P.marcador = { texto, caixa: texto === "☐", recuo, k: { ...P.k } };
+    out.push(blocoPar(P, larg));
+    if (sub.length) listaPdf(sub, tipo, larg, nivel + 1, out);
+  }
+  return out;
+}
+function tabelaConteudoPdf(cx, b, larg, legenda = true) {
+  const tipo = b.tipo || "Tabela", out = [];
+  if (legenda) {
+    cx.cont[tipo] = (cx.cont[tipo] || 0) + 1;
+    out.push(blocoPar(parPdf("Legenda", [tr(`${tipo} ${cx.cont[tipo]} – `, { b: true, sz: 10 })].concat(trechosPdf(b.titulo || "", { sz: 10 }))), larg));
+  }
+  const cab = b.cabecalho || [], linhas = b.linhas || [];
+  const ncol = cab.length ? cab.length : Math.max(...linhas.map(l => l.length));
+  const pesos = (b.larguras && b.larguras.length) ? b.larguras : Array(ncol).fill(1), soma = pesos.reduce((a, c) => a + c, 0);
+  const alinh = b.alinhamento || Array(ncol).fill("left"), l1 = lPdf(1);
+  const linha = (vals, c) => ({ cabeca: c, celulas: Array.from({ length: ncol }, (_, k) => ({
+    pars: [parPdf("TabelaTexto", trechosPdf(k < vals.length ? vals[k] : "", c ? { b: true } : {}), { jc: c ? "center" : ({ both: "both", center: "center", right: "right" }[alinh[k]] || "left") })],
+    fundo: c ? realce() : null, bordaBase: c ? l1 : null, valinhar: "center" })) });
+  out.push(tabelaPdf({ larguras: pesos.map(p => larg * p / soma), margens: { t: 2, b: 2, l: 4, r: 4 },
+    bordas: tipo === "Quadro" ? { topo: l1, base: l1, esq: l1, dir: l1, h: l1, v: l1 } : { topo: l1, base: l1 },
+    linhas: (cab.length ? [linha(cab, true)] : []).concat(linhas.map(l => linha(l, false))) }));
+  if (legenda) {
+    out.push(blocoPar(parPdf("Fonte", [tr("Fonte: ", { sz: 10 })].concat(trechosPdf("fonte" in b ? b.fonte : `Elaborado pela empresa (${new Date().getFullYear()}).`, { sz: 10 }))), larg));
+    if (b.nota) out.push(blocoPar(parPdf("Fonte", [tr("Nota: ", { sz: 10 })].concat(trechosPdf(b.nota, { sz: 10 }))), larg));
+  }
+  return out;
+}
+function camposPdf(itens, larg, rotuloCm = 4.0) {
+  const c1 = rotuloCm * PT_CM;
+  return [tabelaPdf({ larguras: [c1, larg - c1], margens: { t: 1.5, b: 1.5, l: 3, r: 3 },
+    bordas: { topo: lPdf(0.5, "A6A6A6"), base: lPdf(0.5, "A6A6A6"), h: lPdf(0.5, "D9D9D9") },
+    linhas: itens.map(([rot, val]) => ({ celulas: [
+      { pars: [parPdf("TabelaTexto", [tr(rot, { b: true, sz: 10 })])], fundo: realce() },
+      { pars: [parPdf("TabelaTexto", trechosPdf(val, { sz: 10 }))] }] })) }),
+    blocoPar(parPdf("TabelaTexto", []), larg)];
+}
+function assinaturasPdf(ass, larg) {
+  if (!ass || !ass.length) return [];
+  const porLinha = ass.length > 1 ? 2 : 1, out = [blocoPar(parPdf("Normal", [], { antes: 0, depois: 0, keep: true }), larg)];
+  for (let i = 0; i < ass.length; i += porLinha) {
+    const grupo = ass.slice(i, i + porLinha);
+    const total = porLinha > 1 ? larg : Math.min(larg, 9 * PT_CM), w = total / porLinha;
+    out.push(tabelaPdf({ larguras: grupo.map(() => w), x: (larg - total) / 2, margens: { l: 10, r: 10 }, keep: i + porLinha < ass.length,
+      linhas: [{ celulas: grupo.map(a => ({ pars: [
+        parPdf("TabelaTexto", [], { antes: 45, keep: true }),
+        parPdf("TabelaTexto", [tr((a.nome || "").toUpperCase(), { b: true, sz: 10 })], { jc: "center", bordaTopo: { w: 0.75, esp: 4, cor: "000000" } }),
+        ...[a.cargo, a.papel, a.documento].filter(Boolean).map(x => parPdf("TabelaTexto", [tr(x, { sz: 10 })], { jc: "center" }))] })) }] }));
+  }
+  out.push(blocoPar(parPdf("Normal", [], { antes: 0, depois: 0, linha: 1 }), larg));
+  return out;
+}
+function quadroGradePdf(cab, linhas, ws, extrasLinha) {
+  const l = lPdf(0.5);
+  return tabelaPdf({ larguras: ws, margens: { l: 4.25, r: 4.25 }, bordas: { topo: l, base: l, esq: l, dir: l, h: l, v: l },
+    linhas: [{ cabeca: true, celulas: cab.map(c => ({ pars: [parPdf("TabelaTexto", [tr(c, { b: true, sz: 10 })], { jc: "center" })], fundo: realce(), valinhar: "center" })) }]
+      .concat(linhas.map(cs => ({ ...extrasLinha, celulas: cs.map(pars => ({ pars, valinhar: "center" })) }))) });
+}
+function assinaturasTabelaPdf(ass, larg) {
+  if (!ass || !ass.length) return [];
+  const ws = [0.3, 0.18, 0.14, 0.26].map(x => larg * x); ws.push(larg - ws.reduce((a, b) => a + b, 0));
+  return [blocoPar(parPdf("SemRecuo", [tr("Assinaturas", { b: true })], { keep: true, antes: 12 }), larg),
+    quadroGradePdf(CAB_ASSINATURAS, ass.map(a => [String(a.nome || "").toUpperCase(), a.cargo || "", a.papel || a.documento || "", "", ""]
+      .map((x, i) => [parPdf("TabelaTexto", [tr(x, { sz: 10, b: i === 0 })])])), ws, { altura: 1.1 * PT_CM }),
+    blocoPar(parPdf("Normal", [], { antes: 0, depois: 0, linha: 1 }), larg)];
+}
+function anexosPdf(itens, larg) {
+  if (!itens || !itens.length) return [];
+  const w1 = 1.2 * PT_CM, w3 = 2.3 * PT_CM;
+  return [blocoPar(parPdf("SemRecuo", [tr("Anexos", { b: true })], { keep: true, antes: 12 }), larg),
+    blocoPar(parPdf("SemRecuo", [tr(TEXTO_ANEXOS, { sz: 10 })], { keep: true }), larg),
+    quadroGradePdf(CAB_ANEXOS, itens.map((a, i) => [
+      [parPdf("TabelaTexto", [tr(String(i + 1), { sz: 10 })], { jc: "center" })],
+      [parPdf("TabelaTexto", [tr(a.nome || a.original || "", { sz: 10 })]), parPdf("TabelaTexto", [tr(`SHA-256: ${a.sha256 || ""}`, { sz: 7, mono: true })])],
+      [parPdf("TabelaTexto", [tr(tamanhoTxt(a.tamanho), { sz: 10 })], { jc: "right" })]]), [w1, larg - w1 - w3, w3], {}),
+    blocoPar(parPdf("Normal", [], { antes: 0, depois: 0, linha: 1 }), larg)];
+}
+function blocosPdf(cx, lista, larg, longo) {
+  const out = [];
+  for (const b of lista) {
+    const t = b.t, m = /^h([1-5])$/.exec(t || "");
+    if (m) {
+      const nivel = +m[1];
+      let quebra = longo && nivel === 1 && !cx.primeiroH1 && b.nova_pagina !== false;
+      if (longo && nivel === 1 && cx.primeiroH1 && cx.quebraPrimeiro) quebra = true;   // o primeiro título do corpo abre página
+      if (nivel === 1) cx.primeiroH1 = false;
+      out.push(tituloPdf(cx, nivel, b.texto, b.numerar !== false, quebra, larg));
+    }
+    else if (t === "p") out.push(blocoPar(parPdf(b.sem_recuo ? "SemRecuo" : "Normal", trechosPdf(b.texto), b.alinhar ? { jc: b.alinhar === "justify" ? "both" : b.alinhar } : {}), larg));
+    else if (MARCADORES[t]) out.push(...listaPdf(b.itens, t, larg));
+    else if (t === "citacao") out.push(blocoPar(parPdf("CitacaoLonga", trechosPdf(b.texto + (b.fonte ? ` ${b.fonte}` : ""), { sz: 10 })), larg));
+    else if (t === "nota") out.push(blocoPar(parPdf("Nota", [tr(`${b.rotulo || "Nota"}: `, { b: true, sz: 10 })].concat(trechosPdf(b.texto, { sz: 10 }))), larg));
+    else if (t === "destaque") {
+      const cor = { atencao: "C99700", info: "1F5FA8", erro: "B00020" }[b.nivel || "info"] || "1F5FA8";
+      out.push(blocoPar(parPdf("SemRecuo", [tr(`${b.rotulo || "Importante"}: `, { b: true })].concat(trechosPdf(b.texto)), { esq: 11.35, bordaEsq: { w: 3, esp: 8, cor } }), larg));
+    }
+    else if (t === "tabela") out.push(...tabelaConteudoPdf(cx, b, larg));
+    else if (t === "campos") out.push(...camposPdf(b.itens, larg, b.rotulo_cm || 4.0));
+    else if (t === "assinaturas") out.push(...(b.formato === "tabela" ? assinaturasTabelaPdf(b.itens, larg) : assinaturasPdf(b.itens, larg)));
+    else if (t === "anexos_externos") out.push(...anexosPdf(b.itens, larg));
+    else if (t === "local_data") out.push(blocoPar(parPdf("SemRecuo", [tr(`${"local" in b ? b.local : dado("cidade")}, ${dataExtenso(b.data || hojeBR())}.`)], { jc: "right", antes: 12, keep: true }), larg));
+    else if (t === "quebra") out.push({ rows: [], antes: 0, depois: 0, quebra: true });
+    else if (t === "codigo") for (const l of String(b.texto).split("\n")) out.push(blocoPar(parPdf("TabelaTexto", [tr(l, { mono: true, sz: 9.5 })], { esq: 14.2 }), larg));
+    // figura: a página não lê imagens do corpo (o .docx também sai sem ela)
+  }
+  return out;
+}
+
+/* ------------------------------------------------ paginação */
+// Coloca os blocos nas páginas: espaço entre blocos é o maior dos dois (como na estimativa de assinaturasSozinhas),
+// título e bloco "keep" andam com o começo do seguinte, parágrafo só se divide deixando duas linhas de cada lado e
+// tabela partida repete a linha de cabeçalho.
+function paginarPdf(blocos, abrir, larg, x0) {
+  let pag = abrir(), y = pag.topo, vazio = true, depAnt = 0;
+  const nova = () => { pag = abrir(); y = pag.topo; vazio = true; depAnt = 0; };
+  const altura = b => b.rows.reduce((s, r) => s + r.h, 0);
+  const minimo = b => !b ? 0 : b.inteiro ? altura(b) : b.rows.slice(0, b.viuvas ? 2 : 1 + (b.cabeca || 0)).reduce((s, r) => s + r.h, 0);
+  const desenhar = (rows, idx) => idx.forEach((i, p) => { rows[i].desenhar(pag.pg, x0, y, { primeira: p === 0, ultima: p === idx.length - 1 }); y += rows[i].h; });
+  for (let i = 0; i < blocos.length; i++) {
+    const b = blocos[i], prox = blocos[i + 1];
+    if (b.quebra && !vazio) nova();
+    if (!b.rows.length) continue;
+    let gap = vazio ? 0 : Math.max(depAnt, b.antes);
+    const precisa = b.keep && prox && !prox.quebra && prox.rows.length ? altura(b) + Math.max(b.depois, prox.antes) + minimo(prox) : minimo(b);
+    if (!vazio && y + gap + precisa > pag.base + 0.01) { nova(); gap = 0; }
+    y += gap;
+    if (b.ref) b.ref.pagina = pag.pg.indice + 1;
+    const n = b.rows.length;
+    let j = 0;
+    while (j < n) {
+      let k = j, h = 0;
+      while (k < n && y + h + b.rows[k].h <= pag.base + 0.01) { h += b.rows[k].h; k++; }
+      if (k < n) {
+        if (b.viuvas && !vazio && k - j < 2) k = j;                         // órfã: o parágrafo vai inteiro
+        else if (b.viuvas && n - k < 2 && n - j >= 4) k = n - 2;            // viúva: leva uma linha a mais
+        else if (b.viuvas && n - k < 2 && !vazio) k = j;
+        if (b.inteiro && !vazio) k = j;
+        if (k === j && vazio) k = j + 1;                                     // nem uma linha cabe em página vazia
+      }
+      const cab = j > 0 && b.cabeca ? Array.from({ length: b.cabeca }, (_, c) => c) : [];
+      const idx = cab.concat(Array.from({ length: k - j }, (_, c) => j + c));
+      if (k > j) desenhar(b.rows, idx);
+      j = k;
+      if (j < n) nova(); else vazio = false;
+    }
+    depAnt = b.depois;
+  }
+  return pag;
+}
+
+/* ------------------------------------------------ cabeçalho, rodapé, borda e marca d'água */
+function cabecalhoPdf(pg, spec, total, margEsq) {
+  const est = ESTADOS[spec.estado], y0 = 1.2 * PT_CM, hf = 0.55 * PT_CM, x0 = margEsq * PT_CM, larg = (21 - margEsq - 2) * PT_CM;
+  pg.retangulo(1.2 * PT_CM, y0, (21 - 2.4) * PT_CM, hf, est.cor);
+  const faixa = medirPar(parPdf("Rodape", [tr(textoTarja(spec), { b: true, sz: 8, cor: est.texto, esp: 0.5 })], { jc: "center" }), (21 - 2.4) * PT_CM);
+  faixa.rows[0].desenhar(pg, 1.2 * PT_CM, y0 + (hf - faixa.rows[0].h) / 2);
+  let texto = est.rodape;
+  if (spec.estado === "OFICIAL" && spec.aprovado_por) texto = `Aprovado por ${spec.aprovado_por} em ${spec.data_aprovacao || ""}. ` + texto;
+  const oficial = spec.estado === "OFICIAL";
+  const pars = [
+    parPdf("Rodape", [tr(codigoVersao(spec) + "  ·  ", { sz: 8, cor: sec("404040") }), tr(`Página ${pg.indice + 1} de ${total}`, { sz: 8, cor: corTexto(), b: true })], { jc: "center", antes: 4 }),
+    parPdf("Rodape", [tr(texto, { sz: 7.5, cor: oficial ? sec("404040") : est.cor, b: !oficial })], { jc: "center" }),
+    parPdf("Rodape", [tr(identificacaoEmpresa(), { sz: 7.5, cor: sec("7F7F7F") })], { jc: "center", bordaBase: { w: 0.5, esp: 4, cor: "BFBFBF" } })];
+  let y = y0 + hf;
+  for (const P of pars) { const m = medirPar(P, larg); y += m.antes; for (const r of m.rows) { r.desenhar(pg, x0, y); y += r.h; } }
+}
+// Logos lado a lado (grupo) ou o da empresa, na altura dada; empresa sem logo sai pelo nome, erguido até o meio.
+function itensLogo(alturaCm, grupo) {
+  const h = alturaCm * PT_CM;
+  const um = k => EMPRESAS[k].sem_logo || !LOGOS[k]
+    ? { nome: EMPRESAS[k].marca, k: { b: true, sz: arred(alturaCm * 14), cor: EMPRESAS[k].cor }, sobe: arred(alturaCm * 18.5) / 2 }
+    : { logo: LOGOS[k], w: h * LOGOS[k].w / LOGOS[k].h, h };
+  const lst = grupo ? EMPRESAS_DO_GRUPO.map(um) : EMPRESA.sem_logo ? [] : [um(EMP_ID)];
+  for (const it of lst) if (it.nome) { it.cs = codigosPdf(it.nome); it.w = largCodigos(it.cs, it.k); }
+  return lst;
+}
+function desenharLogos(pg, pdf, itens, x, yBase) {
+  const sep = largCodigos([32, 32], { sz: 8 });
+  itens.forEach((it, i) => {
+    if (i) x += sep;
+    if (it.logo) pg.imagem(pdf.imagem(it.logo), x, yBase - it.h, it.w, it.h);
+    else pg.texto(it.cs, it.k, x, yBase - it.sobe);
+    x += it.w;
+  });
+}
+const largLogos = itens => itens.reduce((s, it, i) => s + it.w + (i ? largCodigos([32, 32], { sz: 8 }) : 0), 0);
+function rodapeLogoPdf(pg, pdf, margEsq) {
+  const x0 = margEsq * PT_CM, larg = (21 - margEsq - 2) * PT_CM, base = PAG_A - 1.2 * PT_CM;
+  const itens = itensLogo(EMPRESA.grupo ? 1.0 : 1.3, EMPRESA.grupo);
+  const hLinha = itens.length ? Math.max(...itens.map(it => it.h || it.k.sz * ALT_LINHA)) + DESC * 8 : 8 * ALT_LINHA;
+  const yBase = base - DESC * 8, topo = base - hLinha;
+  desenharLogos(pg, pdf, itens, x0 + (larg - largLogos(itens)) / 2, yBase);
+  pg.linha(x0, topo - 6 - 0.75, x0 + larg, topo - 6 - 0.75, 1.5, EMPRESA.cor);
+}
+function rodapeReduzidoPdf(pg, pdf, spec, margEsq) {
+  const x0 = margEsq * PT_CM, larg = (21 - margEsq - 2) * PT_CM, base = PAG_A - 1.2 * PT_CM - 0.5 * 8 * ALT_LINHA;
+  const itens = itensLogo(EMPRESA.grupo ? 0.6 : 0.9, EMPRESA.grupo);
+  const c1 = larg * (EMPRESA.grupo ? 0.6 : 0.35);
+  const P = parPdf("Rodape", [tr(spec.titulo_curto || spec.titulo, { sz: 8, cor: sec("404040") })], { jc: "right" }), m = medirPar(P, larg - c1);
+  const hLogo = itens.length ? Math.max(...itens.map(it => it.h || it.k.sz * ALT_LINHA)) + DESC * 8 : 8 * ALT_LINHA;
+  const hRow = 5 + Math.max(hLogo, m.h), topo = base - hRow, meio = topo + 5 + (hRow - 5) / 2;
+  desenharLogos(pg, pdf, itens, x0, meio + hLogo / 2 - DESC * 8);
+  let y = meio - m.h / 2; for (const r of m.rows) { r.desenhar(pg, x0 + c1, y); y += r.h; }
+  pg.linha(x0, topo, x0 + larg, topo, 1.5, EMPRESA.cor);
+}
+function marcaDaguaPdf(spec) {
+  const est = ESTADOS[spec.estado];
+  if (!est.marca) return "";
+  const cs = codigosPdf(est.marca), k = { b: true, sz: 1 }, w1 = largCodigos(cs, k);
+  const sz = 470 / w1, c = Math.SQRT1_2, w = w1 * sz, h = 0.718 * sz;   // altura da maiúscula da Helvetica
+  // centro da página; o texto sobe da esquerda para a direita a 45°
+  const cx = PAG_L / 2, cy = PAG_A / 2, x = cx - (w / 2) * c + (h / 2) * c, y = cy - (w / 2) * c - (h / 2) * c;
+  return `BT /F2 ${numPdf(sz)} Tf ${corPdf(est.claro)} rg 0 Tc ${numPdf(c)} ${numPdf(c)} ${numPdf(-c)} ${numPdf(c)} ${numPdf(x)} ${numPdf(y)} Tm (${textoPdf(cs)}) Tj ET`;
+}
+const bordaPaginaPdf = () => { const d = 28; return `0.75 w 0 0 0 RG ${d} ${d} ${numPdf(PAG_L - 2 * d)} ${numPdf(PAG_A - 2 * d)} re S`; };
+
+/* ------------------------------------------------ imagens (JPEG direto; PNG decodificado em RGB + máscara alfa) */
+const concatBytes = partes => { const t = partes.reduce((s, p) => s + p.length, 0), o = new Uint8Array(t); let i = 0; for (const p of partes) { o.set(p, i); i += p.length; } return o; };
+async function fluxoPdf(dados, stream) { return new Uint8Array(await new Response(new Blob([dados]).stream().pipeThrough(stream)).arrayBuffer()); }
+async function lerPng(d) {
+  const dv = new DataView(d.buffer, d.byteOffset, d.byteLength), idat = [];
+  let i = 8, w = 0, h = 0, prof = 8, tipo = 2, entrelacado = 0, pal = null, trns = null;
+  while (i + 8 <= d.length) {
+    const n = dv.getUint32(i), t = String.fromCharCode(d[i + 4], d[i + 5], d[i + 6], d[i + 7]), c = d.subarray(i + 8, i + 8 + n);
+    if (t === "IHDR") { w = dv.getUint32(i + 8); h = dv.getUint32(i + 12); prof = d[i + 16]; tipo = d[i + 17]; entrelacado = d[i + 20]; }
+    else if (t === "PLTE") pal = c; else if (t === "tRNS") trns = c; else if (t === "IDAT") idat.push(c); else if (t === "IEND") break;
+    i += 12 + n;
+  }
+  if (entrelacado) throw new Error("PNG entrelaçado");
+  const canais = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[tipo], bpp = Math.max(1, canais * prof / 8), linha = Math.ceil(w * canais * prof / 8);
+  const z = await fluxoPdf(concatBytes(idat), new DecompressionStream("deflate")), px = new Uint8Array(h * linha);
+  for (let y = 0; y < h; y++) {
+    const f = z[y * (linha + 1)], s = y * (linha + 1) + 1, o = y * linha;
+    for (let x = 0; x < linha; x++) {
+      const a = x >= bpp ? px[o + x - bpp] : 0, b = y ? px[o - linha + x] : 0, c = x >= bpp && y ? px[o - linha + x - bpp] : 0;
+      let v = z[s + x];
+      if (f === 1) v += a; else if (f === 2) v += b; else if (f === 3) v += (a + b) >> 1;
+      else if (f === 4) { const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c); v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c; }
+      px[o + x] = v & 255;
+    }
+  }
+  const max = (1 << Math.min(prof, 8)) - 1;
+  const amostra = (y, idx) => {
+    if (prof === 8) return px[y * linha + idx];
+    if (prof === 16) return px[y * linha + idx * 2];
+    const porByte = 8 / prof, by = px[y * linha + Math.floor(idx / porByte)];
+    return (by >> (8 - prof * (idx % porByte + 1))) & max;
+  };
+  const rgb = new Uint8Array(w * h * 3), temAlfa = tipo === 4 || tipo === 6 || (tipo === 3 && trns), alfa = temAlfa ? new Uint8Array(w * h) : null;
+  const esc = v => prof < 8 ? Math.round(v * 255 / max) : v;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const p = y * w + x, q = x * canais;
+    let r, g, b, a = 255;
+    if (tipo === 3) { const ix = amostra(y, q); r = pal[ix * 3]; g = pal[ix * 3 + 1]; b = pal[ix * 3 + 2]; if (trns && ix < trns.length) a = trns[ix]; }
+    else if (tipo === 0 || tipo === 4) { r = g = b = esc(amostra(y, q)); if (tipo === 4) a = amostra(y, q + 1); }
+    else { r = amostra(y, q); g = amostra(y, q + 1); b = amostra(y, q + 2); if (tipo === 6) a = amostra(y, q + 3); }
+    rgb[p * 3] = r; rgb[p * 3 + 1] = g; rgb[p * 3 + 2] = b;
+    if (alfa) alfa[p] = a;
+  }
+  return { w, h, rgb, alfa };
+}
+function infoJpeg(d) {
+  let i = 2;
+  while (i + 9 < d.length) {
+    if (d[i] !== 0xFF) { i++; continue; }
+    const m = d[i + 1];
+    if (m === 0xFF) { i++; continue; }
+    if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) return { h: (d[i + 5] << 8) | d[i + 6], w: (d[i + 7] << 8) | d[i + 8], comp: d[i + 9] };
+    i += 2 + ((d[i + 2] << 8) | d[i + 3]);
+  }
+  return null;
+}
+const CACHE_IMG_PDF = new WeakMap();   // o mesmo logo não é decodificado a cada prévia
+async function objetosImagem(lg) {
+  if (CACHE_IMG_PDF.has(lg.dados)) return CACHE_IMG_PDF.get(lg.dados);
+  const d = lg.dados, zl = async b => typeof CompressionStream === "function" ? { dados: await fluxoPdf(b, new CompressionStream("deflate")), filtro: "/Filter /FlateDecode " } : { dados: b, filtro: "" };
+  let r;
+  if (d[0] === 0xFF && d[1] === 0xD8) {
+    const inf = infoJpeg(d);
+    if (!inf) throw new Error("JPEG sem cabeçalho de quadro");
+    const cs = inf.comp === 1 ? "/DeviceGray" : inf.comp === 4 ? "/DeviceCMYK /Decode [1 0 1 0 1 0 1 0]" : "/DeviceRGB";
+    r = { principal: { dic: `/Type /XObject /Subtype /Image /Width ${inf.w} /Height ${inf.h} /ColorSpace ${cs} /BitsPerComponent 8 /Filter /DCTDecode`, dados: d } };
+  } else {
+    const p = await lerPng(d), c = await zl(p.rgb);
+    r = { principal: { dic: `/Type /XObject /Subtype /Image /Width ${p.w} /Height ${p.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 ${c.filtro}`, dados: c.dados } };
+    if (p.alfa) { const a = await zl(p.alfa); r.mascara = { dic: `/Type /XObject /Subtype /Image /Width ${p.w} /Height ${p.h} /ColorSpace /DeviceGray /BitsPerComponent 8 ${a.filtro}`, dados: a.dados }; }
+  }
+  CACHE_IMG_PDF.set(lg.dados, r);
+  return r;
+}
+
+/* ------------------------------------------------ montagem */
+class DocPdf {
+  constructor() { this.paginas = []; this.imagens = []; }
+  pagina(secao) { const pg = new PaginaPdf(this.paginas.length, secao); this.paginas.push(pg); return pg; }
+  imagem(lg) { let i = this.imagens.indexOf(lg); if (i < 0) { this.imagens.push(lg); i = this.imagens.length - 1; } return `Im${i + 1}`; }
+  async bytes(titulo) {
+    const enc = new TextEncoder(), partes = [], ofs = [];
+    let pos = 0, n = 0;
+    const add = x => { const b = typeof x === "string" ? enc.encode(x) : x; partes.push(b); pos += b.length; };
+    const obj = (corpo, fluxo) => {
+      ofs[++n] = pos;
+      if (fluxo) { add(`${n} 0 obj\n<< ${corpo} /Length ${fluxo.length} >>\nstream\n`); add(fluxo); add("\nendstream\nendobj\n"); }
+      else add(`${n} 0 obj\n${corpo}\nendobj\n`);
+      return n;
+    };
+    add("%PDF-1.4\n");
+    const nPag = this.paginas.length, base = 3;
+    // 1 catálogo, 2 árvore de páginas, 3–7 fontes, depois imagens, depois página + conteúdo de cada uma
+    ofs[++n] = pos; add(`1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`);
+    const nImgs = [];
+    const objsImg = [];
+    for (const lg of this.imagens) objsImg.push(await objetosImagem(lg));
+    let prox = base + 5;
+    for (const o of objsImg) { nImgs.push(prox); prox += o.mascara ? 2 : 1; }
+    const kids = this.paginas.map((_, i) => `${prox + i * 2} 0 R`).join(" ");
+    ofs[++n] = pos; add(`2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${nPag} >>\nendobj\n`);
+    ["Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique", "Courier"].forEach(f =>
+      obj(`<< /Type /Font /Subtype /Type1 /BaseFont /${f} /Encoding /WinAnsiEncoding >>`));
+    objsImg.forEach((o, i) => {
+      const smask = o.mascara ? ` /SMask ${nImgs[i] + 1} 0 R` : "";
+      obj(o.principal.dic + smask, o.principal.dados);
+      if (o.mascara) obj(o.mascara.dic, o.mascara.dados);
+    });
+    const recursos = `/Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R /F4 6 0 R /F5 7 0 R >> /XObject << ${this.imagens.map((_, i) => `/Im${i + 1} ${nImgs[i]} 0 R`).join(" ")} >>`;
+    for (const pg of this.paginas) {
+      const txt = pg.ops.map(o => typeof o === "function" ? o() : o).join("\n");
+      obj(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${numPdf(PAG_L)} ${numPdf(PAG_A)}] /Resources << ${recursos} >> /Contents ${n + 2} 0 R >>`);
+      obj("", enc.encode(txt));
+    }
+    const info = obj(`<< /Title (${textoPdf(codigosPdf(titulo || ""))}) /Producer (Timbrador - previa) >>`);
+    const xref = pos;
+    add(`xref\n0 ${n + 1}\n0000000000 65535 f \n` + ofs.slice(1).map(o => String(o).padStart(10, "0") + " 00000 n \n").join(""));
+    add(`trailer\n<< /Size ${n + 1} /Root 1 0 R /Info ${info} 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+    return concatBytes(partes);
+  }
+}
+
+// Prévia do documento: o mesmo spec e o mesmo conteúdo que o gerarDocx recebe, já validados.
+async function gerarPdf(spec, conteudo) {
+  const est = ESTADOS[spec.estado], longo = spec.variante === "longo", pdf = new DocPdf();
+  const tipoNome = spec.tipo_nome || TIPOS_CURTOS[spec.tipo] || TIPOS_LONGOS[spec.tipo] || "Documento";
+  const cx = { sec: [0, 0, 0, 0, 0], titulos: [], cont: { Tabela: 0, Quadro: 0, Figura: 0, "Gráfico": 0 }, primeiroH1: true, quebraPrimeiro: false };
+  const larg = (21 - MARG_TIMBRADO[1] - MARG_TIMBRADO[3]) * PT_CM, x0 = MARG_TIMBRADO[3] * PT_CM;
+  const abrir = (secao, marg) => () => ({ pg: pdf.pagina(secao), topo: marg[0] * PT_CM, base: PAG_A - marg[2] * PT_CM });
+  let blocos = [];
+  if (!longo) {
+    blocos.push(blocoPar(parPdf("TituloDocumento", [tr(tipoNome.toUpperCase() + (spec.titulo ? ` – ${spec.titulo}` : ""), { b: true })]), larg));
+    blocos.push(blocoPar(parPdf("SemRecuo", [tr(`${spec.codigo}  ·  Versão ${spec.versao}  ·  Emissão ${spec.data_emissao}  ·  `, { sz: 9, cor: sec("404040") }),
+      tr(est.rotulo.toUpperCase(), { sz: 9, b: true, cor: est.cor })], { jc: "center", antes: 0, depois: 12, linha: 1 }), larg));
+    if (spec.identificacao && spec.identificacao.length) blocos.push(...camposPdf(spec.identificacao, larg, 3.3));
+    blocos.push(...blocosPdf(cx, conteudo, larg, false));
+    paginarPdf(blocos, abrir("timbrado", MARG_TIMBRADO), larg, x0);
+  } else {
+    capaPdf(pdf.pagina("timbrado"), spec, tipoNome, larg, x0);
+    const largA = (21 - MARG_ABNT[1] - MARG_ABNT[3]) * PT_CM, xA = MARG_ABNT[3] * PT_CM;
+    blocos.push(blocoPar(parPdf("TituloSumario", [tr("FOLHA DE CONTROLE")]), largA));
+    blocos.push(...camposPdf([["Título", spec.titulo + (spec.subtitulo ? ` – ${spec.subtitulo}` : "")], ["Tipo", tipoNome], ["Código", spec.codigo], ["Versão", spec.versao],
+      ["Estado", `**${est.rotulo.toUpperCase()}**`], ["Classificação", spec.classificacao],
+      ["Área responsável", spec.area_nome || AREAS[String(spec.area || "").toUpperCase()] || spec.area || ""],
+      ["Elaborado por", spec.elaborado_por || ""], ["Revisado por", spec.revisado_por || ""], ["Aprovado por", spec.aprovado_por || "Pendente – documento não aprovado"],
+      ["Data de emissão", spec.data_emissao], ["Vigência", spec.estado === "OBSOLETO" ? "Encerrada" : (spec.vigencia || "A partir da aprovação")]]
+      .concat(spec.substitui ? [["Substitui", spec.substitui]] : [])
+      .concat(spec.substituido_por ? [["Substituído por", spec.substituido_por]] : [])
+      .concat(spec.motivo_obsoleto ? [["Motivo da obsolescência", spec.motivo_obsoleto]] : []), largA, 4.5));
+    const hist = (spec.historico && spec.historico.length) ? spec.historico : [{ versao: spec.versao, data: spec.data_emissao, descricao: "Emissão inicial.", responsavel: spec.elaborado_por || "" }];
+    blocos.push(blocoPar(parPdf("SemRecuo", [tr("Histórico de revisões", { b: true })], { antes: 12, depois: 6, keep: true }), largA));
+    blocos.push(...tabelaConteudoPdf(cx, { tipo: "Quadro", cabecalho: ["Versão", "Data", "O que mudou", "Responsável"], larguras: [1.4, 1.6, 5, 2.4],
+      linhas: hist.map(h => [h.versao || "", h.data || "", h.descricao || "", h.responsavel || ""]) }, largA, false));
+    if (spec.estado === "OFICIAL") {
+      blocos.push(blocoPar(parPdf("SemRecuo", [tr("Aprovação", { b: true })], { antes: 12, depois: 0, keep: true }), largA));
+      blocos.push(...assinaturasPdf(spec.assinaturas_aprovacao || [{ nome: spec.aprovado_por, cargo: spec.cargo_aprovador || "Aprovador", documento: `Aprovado em ${spec.data_aprovacao}` }], largA));
+    }
+    const temSumario = spec.sumario !== false, corpo = [];
+    cx.quebraPrimeiro = true;
+    corpo.push(...blocosPdf(cx, conteudo, largA, true));
+    if (spec.referencias && spec.referencias.length) corpo.push(tituloSemNumeroPdf(cx, "Referências", largA), ...spec.referencias.map(r => blocoPar(parPdf("Referencia", trechosPdf(r)), largA)));
+    if (spec.glossario && spec.glossario.length) corpo.push(tituloSemNumeroPdf(cx, "Glossário", largA), ...spec.glossario.map(([t, d]) => blocoPar(parPdf("SemRecuo", [tr(t + ": ", { b: true })].concat(trechosPdf(d)), { depois: 6 }), largA)));
+    for (const [chave, rotulo] of [["apendices", "APÊNDICE"], ["anexos", "ANEXO"]])
+      (spec[chave] || []).forEach((ap, k) => { corpo.push(tituloSemNumeroPdf(cx, `${rotulo} ${String.fromCharCode(65 + k)} – ${ap.titulo}`, largA), ...blocosPdf(cx, ap.corpo || [], largA, false)); });
+    if (temSumario) {
+      blocos.push(blocoPar(parPdf("TituloSumario", [tr("SUMÁRIO")], { quebra: true }), largA));
+      for (const [nv, t, ref] of cx.titulos.filter(t => t[0] <= 3)) {
+        const P = parPdf("TOC", [tr(t)], { estiloTexto: ["b caps", "caps", ""][nv - 1] });
+        P.toc = { ref };
+        P.dir = largCodigos(codigosPdf("000"), P.k) + 6;   // espaço do número da página
+        blocos.push(blocoPar(P, largA));
+      }
+    }
+    blocos.push(...corpo);
+    paginarPdf(blocos, abrir("abnt", MARG_ABNT), largA, xA);
+  }
+  const total = pdf.paginas.length;
+  for (const pg of pdf.paginas) {
+    const marg = pg.secao === "abnt" ? MARG_ABNT : MARG_TIMBRADO, corpoOps = pg.ops;
+    pg.ops = [marcaDaguaPdf(spec)].concat(corpoOps);
+    cabecalhoPdf(pg, spec, total, marg[3]);
+    if (pg.secao === "abnt") rodapeReduzidoPdf(pg, pdf, spec, marg[3]); else rodapeLogoPdf(pg, pdf, marg[3]);
+    pg.ops.push(bordaPaginaPdf());
+  }
+  return new Blob([await pdf.bytes(`${spec.codigo} – ${spec.titulo || ""}`)], { type: "application/pdf" });
+}
+// Capa do documento longo: tipo, título e subtítulo no meio, o quadro de código, versão, estado e classificação, e
+// local e ano embaixo (a tabela de três linhas da capa do .docx).
+function capaPdf(pg, spec, tipoNome, larg, x0) {
+  const est = ESTADOS[spec.estado], topo = MARG_TIMBRADO[0] * PT_CM, altura = 29.7 - MARG_TIMBRADO[0] - MARG_TIMBRADO[2];
+  const cp = (trechos, o = {}) => parPdf("SemRecuo", trechos, { jc: "center", antes: o.antes || 0, depois: o.depois || 0, linha: o.linha || 1.15 });
+  const meio = [cp([tr(tipoNome.toUpperCase(), { sz: 12, cor: EMPRESA.cor, b: true, esp: 2 })], { depois: 12 }),
+    cp([tr(spec.titulo.toUpperCase(), { b: true, sz: 22, cor: VISUAL.cor_titulo || corTexto() })], { linha: 1.25, depois: 10 }),
+    spec.subtitulo ? cp([tr(spec.subtitulo, { sz: 14, cor: sec("262626") })], { depois: 24 }) : cp([], { depois: 24 })].map(P => medirPar(P, larg));
+  const ctab = [["Código", spec.codigo], ["Versão", spec.versao], ["Estado", est.rotulo.toUpperCase()], ["Classificação", spec.classificacao]];
+  const wqs = [1.6, 1, 1, 1].map(p => larg * p / 4.6);
+  const quadro = tabelaPdf({ larguras: wqs, bordas: { topo: lPdf(0.75), base: lPdf(0.75), v: lPdf(0.5, "BFBFBF") },
+    linhas: [{ celulas: ctab.map(([rot, val]) => ({ pars: [
+      parPdf("TabelaTexto", [tr(rot.toUpperCase(), { sz: 7, cor: sec("595959"), esp: 0.5 })], { jc: "center", antes: 3 }),
+      parPdf("TabelaTexto", [tr(val, { b: true, sz: 9.5, cor: rot === "Estado" ? est.cor : corTexto() })], { jc: "center", depois: 3 })] })) }] });
+  const fim = medirPar(cp([], { linha: 1 }), larg);
+  let h = 0, dep = 0;
+  const pilha = [...meio.map(m => ({ m })), { t: quadro }, { m: fim }];
+  for (const p of pilha) { if (p.m) { h += Math.max(dep, p.m.antes) + p.m.h; dep = p.m.depois; } else { h += dep + p.t.rows[0].h; dep = 0; } }
+  h += dep;
+  const h2 = (altura - 4.2) * PT_CM;
+  let y = topo + 1.0 * PT_CM + (h2 - h) / 2;
+  dep = 0;
+  for (const p of pilha) {
+    if (p.m) { y += Math.max(dep, p.m.antes); for (const r of p.m.rows) { r.desenhar(pg, x0, y); y += r.h; } dep = p.m.depois; }
+    else { y += dep; p.t.rows[0].desenhar(pg, x0, y, { primeira: true, ultima: true }); y += p.t.rows[0].h; dep = 0; }
+  }
+  const baixo = [cp([tr(spec.local, { b: true })]), cp([tr(String(spec.data_emissao || "").slice(-4), { b: true })])].map(P => medirPar(P, larg));
+  let yb = topo + (1.0 + altura - 4.2 + 2.8) * PT_CM - baixo.reduce((s, m) => s + m.h, 0);
+  for (const m of baixo) for (const r of m.rows) { r.desenhar(pg, x0, yb); yb += r.h; }
+}
+</script>
 <script id="interface">
 "use strict";
 (function () {
@@ -2767,6 +3472,7 @@ function organizar(itens) {
       + (ORG.tipos_ativos.includes(t) ? "" : " Sigla aposentada: serve só para atualizar documento antigo.");
     const e = $("estado").value;
     if (!ESTADOS[e]) return;
+    document.body.style.setProperty("--estado", "#" + ESTADOS[e].cor);   // borda do formulário na cor do estado
     $("estado-dica").textContent = ESTADOS[e].dica
       + (e === "OFICIAL" || e === "OBSOLETO" ? "" : " O código sai com XXX: o número é reservado na publicação.");
     document.body.classList.toggle("oficial", e === "OFICIAL");
@@ -3435,11 +4141,9 @@ function organizar(itens) {
     msg("Não foi possível gerar:<ul>" + erros.map(e => `<li>${escH(e.msg)}</li>`).join("") + "</ul>", "erro");
   };
 
-  $("gerar").addEventListener("click", async () => {
-    document.querySelectorAll(".campo-erro").forEach(el => el.classList.remove("campo-erro"));
-    // relê a lista antes de conferir: outra pessoa pode ter reservado um número enquanto esta página estava aberta
-    if (pastaLista) { try { lista = await listaDaPasta(pastaLista); mostrarLista(); } catch (e) { return msg("Não consegui ler a lista mestra na pasta: " + escH(e.message), "erro"); } }
-    dataDeHoje();
+  /* A especificação que sai do formulário, a mesma para Gerar e para a prévia. "antes" são os erros que a página acha
+     antes de validar (rodada, o que mudou, anexos…). */
+  async function montarPedido() {
     const estado = $("estado").value, obsoletar = !!anterior && estado === "OBSOLETO", rel = !obsoletar && modoRel();
     let spec, avisosRel = [];
     const antes = [];
@@ -3493,6 +4197,26 @@ function organizar(itens) {
         spec.historico = historicoAtualizado(anterior, v, oq, spec.elaborado_por, spec.data_emissao);
       }
     }
+    return { spec, antes, estado, obsoletar, rel, avisosRel };
+  }
+  // Corpo do documento: relatório de condução, anexos, local e data e assinaturas (no automático, linhas; se elas
+  // ficariam sozinhas numa página, tabela). Lança erro se o quadro de rodadas não fecha.
+  function corpoDoPedido(spec, rel) {
+    // local e data de assinatura: a data é a deste documento, não a da versão anterior nem a do texto de origem
+    const comData = bl => bl.map(b => b.t === "local_data" ? { ...b, data: spec.data_emissao } : b);
+    const corpoBase = rel ? corpoRel(conteudo.blocos, spec) : conteudo.blocos;
+    let corpoFinal = montarAssinaturas(comData(montarAnexos(corpoBase, spec)), spec, spec.assinatura_formato === "tabela" ? "tabela" : "linhas");
+    const autoTabela = spec.com_assinatura && spec.assinatura_formato !== "linhas" && spec.assinatura_formato !== "tabela" && assinaturasSozinhas(spec, corpoFinal);
+    if (autoTabela) corpoFinal = montarAssinaturas(corpoFinal, spec, "tabela");
+    return { corpoFinal, autoTabela };
+  }
+
+  $("gerar").addEventListener("click", async () => {
+    document.querySelectorAll(".campo-erro").forEach(el => el.classList.remove("campo-erro"));
+    // relê a lista antes de conferir: outra pessoa pode ter reservado um número enquanto esta página estava aberta
+    if (pastaLista) { try { lista = await listaDaPasta(pastaLista); mostrarLista(); } catch (e) { return msg("Não consegui ler a lista mestra na pasta: " + escH(e.message), "erro"); } }
+    dataDeHoje();
+    const { spec, antes, estado, obsoletar, rel, avisosRel } = await montarPedido();
     // relatório de condução não tem cópia obsoleta: a versão nova contém a anterior inteira
     const querObsoleta = !obsoletar && !rel && estado === "OFICIAL" && !!substituida() && $("obsoletar_anterior").checked;
     if (querObsoleta && !original) antes.push({ campo: "soltar-original", msg: "Envie o arquivo oficial da versão substituída para marcá-la como obsoleta, ou desmarque essa opção." });
@@ -3514,14 +4238,8 @@ function organizar(itens) {
       if (planoAnexos.erros.length) return mostrarErros(planoAnexos.erros);
       spec.anexos_externos = planoAnexos.itens.map(({ nome, original, tamanho, sha256 }) => ({ nome, original, tamanho, sha256 }));
     }
-    // local e data de assinatura: a data é a deste documento, não a da versão anterior nem a do texto de origem
-    const comData = bl => bl.map(b => b.t === "local_data" ? { ...b, data: spec.data_emissao } : b);
-    // assinaturas: no automático, linhas; se elas ficariam sozinhas numa página, tabela
-    let corpoBase = conteudo.blocos;
-    if (rel) { try { corpoBase = corpoRel(conteudo.blocos, spec); } catch (e) { return msg(escH(e.message), "erro"); } }
-    let corpoFinal = montarAssinaturas(comData(montarAnexos(corpoBase, spec)), spec, spec.assinatura_formato === "tabela" ? "tabela" : "linhas");
-    const autoTabela = spec.com_assinatura && spec.assinatura_formato !== "linhas" && spec.assinatura_formato !== "tabela" && assinaturasSozinhas(spec, corpoFinal);
-    if (autoTabela) corpoFinal = montarAssinaturas(corpoFinal, spec, "tabela");
+    let corpoFinal, autoTabela;
+    try { ({ corpoFinal, autoTabela } = corpoDoPedido(spec, rel)); } catch (e) { return msg(escH(e.message), "erro"); }
     const blob = gerarDocx(spec, corpoFinal);
     const nome = nomeArquivo(spec);
     const extras = [...avisos, ...avisosRel, ...conf.avisos, ...(conteudo.avisos || []).filter(x => !(spec.com_assinatura && x.startsWith("Assinaturas previstas"))), ...blob.avisos];
@@ -3612,6 +4330,53 @@ function organizar(itens) {
     if (blob.temSumario) extras.push("Ao abrir, o Word pergunta se deseja atualizar os campos: responda Sim para numerar o sumário.");
     msg(saida + (extras.length ? "<ul>" + extras.map(x => `<li>${escH(x)}</li>`).join("") + "</ul>" : ""), "ok");
   });
+  /* ------------------------------------------------ prévia em PDF */
+  // Visualizar abre o PDF do documento, como ele sairia agora, na metade direita da tela; o formulário vai para a
+  // esquerda e a prévia acompanha as mudanças. Pendências (aprovador, número…) não impedem a prévia: aparecem acima dela.
+  let previaUrl = null, previaVez = 0, previaTimer = 0;
+  const previaAberta = () => document.body.classList.contains("com-previa");
+  async function atualizarPrevia() {
+    clearTimeout(previaTimer);
+    if (!previaAberta()) return;
+    const vez = ++previaVez;
+    if (!conteudo) { $("previa-estado").textContent = ""; $("previa-aviso").textContent = "Carregue ou cole o texto do documento para ver a prévia."; return; }
+    $("previa-estado").textContent = "atualizando…";
+    try {
+      const { spec, antes, rel } = await montarPedido();
+      const { erros } = validar(spec);
+      let corpo;
+      try { corpo = corpoDoPedido(spec, rel).corpoFinal; } catch (e) { corpo = conteudo.blocos; antes.push({ msg: e.message }); }
+      const blob = await gerarPdf(spec, corpo);
+      if (vez !== previaVez) return;
+      if (previaUrl) URL.revokeObjectURL(previaUrl);
+      previaUrl = URL.createObjectURL(blob);
+      $("previa-quadro").src = previaUrl + "#navpanes=0&view=FitH";
+      const pend = antes.concat(erros).map(e => e.msg);
+      $("previa-aviso").innerHTML = pend.length ? "Para gerar, ainda falta:<ul>" + pend.map(m => `<li>${escH(m)}</li>`).join("") + "</ul>" : "";
+      $("previa-estado").textContent = `${spec.codigo} · v${spec.versao}`;
+    } catch (e) {
+      if (vez !== previaVez) return;
+      $("previa-estado").textContent = "";
+      $("previa-aviso").textContent = "Não consegui montar a prévia: " + e.message;
+    }
+  }
+  const agendarPrevia = () => { if (!previaAberta()) return; clearTimeout(previaTimer); previaTimer = setTimeout(atualizarPrevia, 500); };
+  function abrirPrevia() { document.body.classList.add("com-previa"); $("previa").hidden = false; atualizarPrevia(); }
+  function fecharPrevia() {
+    document.body.classList.remove("com-previa"); $("previa").hidden = true; previaVez++;
+    $("previa-quadro").removeAttribute("src");
+    if (previaUrl) { URL.revokeObjectURL(previaUrl); previaUrl = null; }
+  }
+  $("visualizar").addEventListener("click", abrirPrevia);
+  $("previa-atualizar").addEventListener("click", atualizarPrevia);
+  $("previa-fechar").addEventListener("click", fecharPrevia);
+  document.addEventListener("input", agendarPrevia, true);
+  document.addEventListener("change", agendarPrevia, true);
+  // Visualizar acompanha o Gerar: liga quando há conteúdo; conteúdo novo (arquivo lido, texto colado) atualiza a prévia
+  new MutationObserver(() => { $("visualizar").disabled = $("gerar").disabled; if (!$("gerar").disabled) agendarPrevia(); })
+    .observe($("gerar"), { attributes: true, attributeFilter: ["disabled"] });
+  $("visualizar").disabled = $("gerar").disabled;
+
   /* ------------------------------------------------ rascunho: o que está na tela sobrevive a recarregar a página */
   // Um rascunho por vez, guardado neste navegador (localStorage), a cada alteração. Leva o conteúdo lido ou colado,
   // os campos, os envolvidos e a ficha da versão anterior. Não leva o arquivo oficial da versão substituída nem o
