@@ -181,6 +181,12 @@ Python embutido divergiam, **o gerador venceu nos sete pontos** (ver seção 4 d
   nginx libera `frame-src blob:` e `object-src blob:` para o leitor de PDF do
   navegador. A borda do formulário tem a cor do estado escolhido (`--estado`).
   Mexeu no `montar`/`blocos`, confira a prévia (`testes/pagina.sh` gera os PDFs).
+- Modo escuro (03/11/2026): as cores da página são variáveis no `:root`, redefinidas
+  em `@media (prefers-color-scheme:dark)` e em `:root[data-tema="escuro"]`; o botão
+  `#tema` cicla automático → claro → escuro e guarda em `localStorage`
+  (`timbrador.tema`), lido por um script no `<head>` antes de desenhar. O `visual`
+  grava as cores neutras em `--v-*`, que só o tema claro usa; texto na cor da marca
+  usa `--cor-texto` (clareada no escuro). Cor nova na página: variável, nos dois temas.
 - Leitura, lista mestra, inventário e pastas continuam os da página original,
   com siglas genéricas (`[A-Z0-9]{2,6}`) e ficha `…timbrador:ficha`.
 - `visual` (opcional): `carregarVisual`/`lerVisual` nos dois lados; `sec()`,
