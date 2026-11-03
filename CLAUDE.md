@@ -52,7 +52,7 @@ python3 skills/timbrador/scripts/gerar_documento.py --embutir-logos marca.json -
 python3 skills/timbrador/scripts/gerar_documento.py --ler|--atualizar|--obsoletar DOCX --marca marca.json ...
 python3 skills/timbrador/scripts/gerar_documento.py --inventariar PASTA --marca marca.json [--conferir]
 bash testes/fumaca.sh        # marca, curto/longo, travas, grupo, CPF, assinaturas previstas, ciclo de vida, projeto, anexos, lista mestra, inventário, relatório de condução, PDF, XML
-bash testes/pagina.sh        # página × gerador, editor da marca e relatório de condução lido e continuado pelos dois lados (precisa de node + jsdom; pula sem eles)
+bash testes/pagina.sh        # página × gerador, editor da marca, relatório de condução lido e continuado pelos dois lados e prévia em PDF (precisa de node + jsdom; pula sem eles)
 bash testes/inventario.sh    # Inventariar.ps1 × --inventariar: lista mestra e alertas iguais (precisa de pwsh ou TIMBRADOR_PWSH; pula sem ele)
 ```
 
@@ -167,6 +167,20 @@ Python embutido divergiam, **o gerador venceu nos sete pontos** (ver seção 4 d
 - O que não dá para portar: números de página do sumário (o Word atualiza ao
   abrir), assinatura automática (a página estima a paginação; o gerador
   renderiza), bloco `figura` (vira aviso). Logo só em data URI (`--embutir-logos`).
+- Prévia em PDF (`<script id="pdf">`, 03/11/2026): o botão **Visualizar** abre o
+  documento em PDF na metade direita da tela (o formulário vai para a esquerda) e
+  acompanha as mudanças do formulário. `gerarPdf(spec, conteudo)` recebe o mesmo
+  pedido do Gerar (`montarPedido` + `corpoDoPedido`) e desenha, sem biblioteca, o
+  leiaute do `montar` em pontos: faixa, controle, borda, marca d'água, rodapés,
+  capa, folha de controle, sumário (já com as páginas) e os blocos de conteúdo.
+  Texto em Helvetica (métricas AFM embutidas, WinAnsi; fora dela sai "?"), JPEG
+  direto e PNG decodificado em RGB + máscara alfa. É estimativa: paginação e quebra
+  de linha podem diferir um pouco do Word, o `visual` só troca cores (as fontes do
+  `visual` não entram no PDF) e `figura` não aparece, como no .docx da página.
+  Pendências do formulário não impedem a prévia: aparecem acima dela. A CSP do
+  nginx libera `frame-src blob:` e `object-src blob:` para o leitor de PDF do
+  navegador. A borda do formulário tem a cor do estado escolhido (`--estado`).
+  Mexeu no `montar`/`blocos`, confira a prévia (`testes/pagina.sh` gera os PDFs).
 - Leitura, lista mestra, inventário e pastas continuam os da página original,
   com siglas genéricas (`[A-Z0-9]{2,6}`) e ficha `…timbrador:ficha`.
 - `visual` (opcional): `carregarVisual`/`lerVisual` nos dois lados; `sec()`,
@@ -226,7 +240,17 @@ pelos dois lados; interface no Chromium (Playwright): texto colado, Projeto,
 assinatura, anexo, Gerar (zip com documento e anexo), caixa do relatório e rascunho
 recuperado ao recarregar, sem erro de console.
 
-**Não coberto ainda:** as fontes embutidas abertas no Word de verdade, `--obsoletar` e a cópia obsoleta automática, inventário
+Prévia em PDF (03/11/2026): `pagina.sh` gera pelo núcleo da página o PDF do curto,
+do longo, do grupo com assinatura e do relatório de condução e confere estrutura,
+código e "Página X de Y"; comparados ao .docx convertido pelo LibreOffice, saem com a
+mesma paginação (o longo com 10 páginas contra 11, porque o LibreOffice põe uma
+página em branco depois da capa). Interface no Chromium: borda na cor do estado,
+formulário à esquerda, prévia atualizada ao mudar o estado, pendências acima dela;
+no Google Chrome (Playwright, `channel="chrome"`), a prévia aparece no leitor de
+PDF tanto aberta como arquivo quanto servida pelo nginx com a CSP. O Chromium e o
+Firefox do Playwright vêm sem leitor de PDF: neles o quadro fica cinza.
+
+**Não coberto ainda:** a prévia no Edge e no Firefox de verdade, as fontes embutidas abertas no Word de verdade, `--obsoletar` e a cópia obsoleta automática, inventário
 gravando, `assinatura_formato` automático trocando para tabela, figuras JPEG grandes, tabelas que quebram entre páginas,
 apêndices com muitos níveis, documentos acima de ~30 páginas, e a aparência real
 no Word (a conferência foi toda via LibreOffice).

@@ -31,6 +31,8 @@ python3 skills/timbrador/scripts/gerar_documento.py --embutir-logos marca.json -
 
 Quem tem manual de marca pode acrescentar ao `marca.json` um `visual` com as fontes (TrueType, embutidas no .docx) e as cores de texto, títulos e realce; a página também se veste com ele (ver `skills/timbrador/SKILL.md`). O documento sai igual ao do gerador. Diferenças só de ambiente: o sumário sai sem números de página (o Word numera ao abrir, quando pergunta se deve atualizar os campos), a escolha automática entre assinaturas em linhas e em tabela é estimada (o gerador renderiza com o LibreOffice) e blocos `figura` não entram (o gerador lê a imagem do disco). Com a pasta dos documentos conectada (Chrome/Edge), a página reserva o número, grava o .docx na pasta do tipo e atualiza o `lista-mestra.json`.
 
+**Visualizar** mostra, na metade direita da tela, o documento em PDF como ele sairia agora, e acompanha o que se muda no formulário; a borda do formulário fica na cor do estado escolhido. A prévia é desenhada no próprio navegador, sem mandar nada para fora. A paginação é estimada e pode diferir um pouco da do Word, e as fontes do `visual` não entram nela: o documento que vale é o .docx.
+
 A página também cuida do campo Projeto (o documento vai para `Projetos/Nome`), dos anexos externos, do relatório de condução de projeto e guarda um rascunho do que está na tela se a página for recarregada.
 
 No Windows, `pagina/Abrir-Timbrador.cmd` abre a página no Edge ou no Chrome, e `pagina/Inventariar.cmd` (arraste a pasta dos documentos sobre ele) monta o `lista-mestra.json` do que já existe, sem Python. Deixe o `marca.json` na mesma pasta dos scripts.
