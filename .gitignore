@@ -1,5 +1,5 @@
 # --- Entrega original (o conteúdo já está extraído e versionado) ---
-Timbrador-white-label-v1.zip
+Timbrador*.zip
 
 # --- Pacote original da página (timbrador.html e scripts) ---
 # Referência local para o porte: traz razão social, CNPJ e logos reais.
@@ -18,6 +18,7 @@ Timbrador-white-label-v1.zip
 marca.json
 skills/timbrador/assets/marca.json
 *_portatil.json
+lista-mestra.json
 
 # --- Python ---
 __pycache__/
