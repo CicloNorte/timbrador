@@ -132,8 +132,12 @@
   .em-flags label.check { margin-top:10px; }
   @media (max-width:480px) { .checks { grid-template-columns:1fr; } .em-nova { grid-template-columns:1fr 1fr; } }
   footer { text-align:center; color:var(--suave); font-size:12px; margin-top:14px; }
-  /* A borda do formulário tem a cor do estado escolhido, a mesma da faixa do documento. */
-  body:not(.sem-marca):not(.editando) .cartao { border:3px solid var(--estado, var(--linha)); transition:border-color .2s; }
+  /* A borda do formulário tem a cor do estado escolhido, a mesma da faixa do documento, e brilha nessa cor. */
+  body:not(.sem-marca):not(.editando) .cartao { border:3px solid var(--estado, var(--linha)); transition:border-color .2s, box-shadow .2s; }
+  body:not(.sem-marca):not(.editando) .cartao { --brilho:color-mix(in srgb, var(--estado, transparent) 70%, transparent); --halo:color-mix(in srgb, var(--estado, transparent) 32%, transparent);
+    box-shadow:0 0 18px 4px var(--brilho), 0 0 60px 16px var(--halo); animation:brilho 3.2s ease-in-out infinite; }
+  @keyframes brilho { 50% { box-shadow:0 0 28px 8px var(--brilho), 0 0 90px 28px var(--halo); } }
+  @media (prefers-reduced-motion:reduce) { body:not(.sem-marca):not(.editando) .cartao { animation:none; } }
   .acoes { display:flex; gap:10px; margin-top:26px; }
   .acoes button { margin-top:0; }
   button.secundario { width:auto; flex:none; padding:14px 18px; color:var(--cor); background:var(--cartao); border:1px solid var(--cor); }
