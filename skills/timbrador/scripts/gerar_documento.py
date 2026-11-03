@@ -69,7 +69,7 @@ def identificacao_empresa():
     return "  ·  ".join(partes)
 
 ESTADOS = {
-    # Aposentado em 05/10/2026: a minuta já cobre o texto que ainda não é oficial. Fica aqui só para ler
+    # Aposentado: a minuta já cobre o texto que ainda não é oficial. Fica aqui só para ler
     # e versionar documentos emitidos antes do corte; não é oferecido para documento novo.
     "RASCUNHO":   {"cor": "595959", "texto": "FFFFFF", "marca": "RASCUNHO", "claro": "E4E4E4",
                    "tarja": "RASCUNHO  ·  DOCUMENTO EM ELABORAÇÃO  ·  SEM VALIDADE OFICIAL",
@@ -80,7 +80,7 @@ ESTADOS = {
     "EM_APROVACAO": {"cor": "1F5FA8", "texto": "FFFFFF", "marca": "EM APROVAÇÃO", "claro": "D9E5F3",
                    "tarja": "EM APROVAÇÃO  ·  AGUARDANDO DECISÃO  ·  SEM VALIDADE OFICIAL",
                    "rodape": "Texto entregue a quem aprova. Sem validade oficial até a aprovação.", "rotulo": "Em aprovação"},
-    # Renomeado para EM_APROVACAO em 08/10/2026: "em revisão" sugeria que o documento oficial estivesse suspenso
+    # Renomeado para EM_APROVACAO: "em revisão" sugeria que o documento oficial estivesse suspenso
     # durante a revisão. Fica aqui só para ler e versionar os arquivos emitidos com o nome antigo.
     "EM_REVISAO": {"cor": "1F5FA8", "texto": "FFFFFF", "marca": "EM REVISÃO", "claro": "D9E5F3",
                    "tarja": "EM REVISÃO  ·  AGUARDANDO APROVAÇÃO  ·  SEM VALIDADE OFICIAL",
@@ -1644,7 +1644,7 @@ def ler_timbrado(caminho, pasta_midia=None):
             if mo: spec["aprovado_por"], spec["data_aprovacao"] = mo.group(1).strip(), mo.group(2)
             ms = re.search(r"SUBSTITUÍDO POR (\S+)", cab)
             if ms: spec["substituido_por"] = ms.group(1)
-            info["avisos"].append("Documento sem ficha (gerado antes de 16/09/2026): dados lidos do cabeçalho; confira título e responsáveis.")
+            info["avisos"].append("Documento sem ficha (gerado antes do Timbrador gravar a ficha): dados lidos do cabeçalho; confira título e responsáveis.")
     rels = {}
     if "word/_rels/document.xml.rels" in nomes:
         for m in re.finditer(r'<Relationship [^>]*Id="([^"]+)"[^>]*Target="([^"]+)"', z.read("word/_rels/document.xml.rels").decode("utf8")):
@@ -2886,7 +2886,7 @@ def main():
         saida_velha = gerar(velha, ativos, a.saida)
         if a.lista and _mesmo_codigo(a.substituido_por, velha):
             print("LISTA MESTRA: não alterada — a substituição é nova versão do mesmo código, e a entrada aponta a vigente.")
-        elif a.lista:   # substituído por outro código (ex.: ABC-POL-ADM-001 → GRP-POL-ADM-001): o código antigo sai de uso
+        elif a.lista:   # substituído por outro código (ex.: ABC-POL-ADM-001 → XYZ-POL-ADM-001): o código antigo sai de uso
             gravar_lista(a.lista, registro_de(velha, saida_velha))
             print(f"LISTA MESTRA: {lista_caminho(a.lista)} atualizada ({velha['codigo']} marcado como obsoleto).")
         return

@@ -1473,7 +1473,7 @@ function proximoNumero(lista, s) {
 }
 // Confere o documento contra a lista antes de gerar. `atualizacao` = o arquivo veio timbrado e é nova versão do mesmo código.
 /* Regra de título da política de documentação: o título diz só o assunto; o tipo já sai impresso acima dele
-   ("POLÍTICA / COMERCIAL", "TERMO – ABERTURA DO PORTAL DE ATENDIMENTO"). Tira do começo do título o nome do tipo,
+   ("POLÍTICA / COMERCIAL", "TERMO – ABERTURA DE CONTA"). Tira do começo do título o nome do tipo,
    o conectivo e um separador que venham em seguida. */
 const OUTROS_NOMES = { POP: ["Procedimento operacional", "Procedimento"], CI: ["Comunicação"], RO: ["Registro de ocorrência"], PRO: ["Proposta"], TER: ["Termo"] };
 function tituloSemTipo(titulo, tipo) {
@@ -2016,7 +2016,7 @@ async function lerTimbrado(ler, nomes, doc, numDoc, h) {
     if (cab.includes("DOCUMENTO OFICIAL")) spec.estado = "OFICIAL";
     const mo = /Aprovado por (.+?) em (\d{2}\/\d{2}\/\d{4})/.exec(cab); if (mo) { spec.aprovado_por = mo[1].trim(); spec.data_aprovacao = mo[2]; }
     const ms = /SUBSTITUÍDO POR (\S+)/.exec(cab); if (ms) spec.substituido_por = ms[1];
-    info.avisos.push("Documento sem ficha (gerado antes de 16/09/2026): dados lidos do cabeçalho. Confira título e responsáveis.");
+    info.avisos.push("Documento sem ficha (gerado antes do Timbrador gravar a ficha): dados lidos do cabeçalho. Confira título e responsáveis.");
   }
   const tiposLista = {};
   const fmtAbs = {};
@@ -2854,7 +2854,7 @@ function organizar(itens) {
     const fh = await dir.getFileHandle(nome, { create: true });
     const w = await fh.createWritable(); await w.write(dados); await w.close();
   }
-  // procura um lista-mestra.json já existente na árvore (ex.: "programas e aplicativos/timbrador")
+  // procura um lista-mestra.json já existente na árvore (ex.: "controle/timbrador")
   async function acharListas(dir, prefixo, prof) {
     const achados = [];
     for await (const [nome, h] of dir.entries()) {
@@ -2896,7 +2896,7 @@ function organizar(itens) {
     await andar(pasta, "", 3);
     let raiz = { h: pasta, caminho: "" }, mais = 0;
     for (const v of pais.values()) if (v.n > mais) { mais = v.n; raiz = { h: v.h, caminho: v.caminho }; }
-    // Obsoletos só vale se estiver na raiz dos documentos (política, seção 4.2)
+    // Obsoletos só vale se estiver na raiz dos documentos
     if (obsoletos && obsoletos.pai !== raiz.caminho) obsoletos = null;
     projetos.sort((a, b) => a.nome.localeCompare(b.nome, "pt"));
     mapa = { raiz, tipos, obsoletos, projetos, projetosRaiz };

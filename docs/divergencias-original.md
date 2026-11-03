@@ -1,6 +1,6 @@
 # Divergências: original (`timbrador.html` + gerador embutido) × gerador atual
 
-Fonte: pacote publicado em 16/10/2026 (artifact `HCKzSUavScLM9AzEpMyuqL`). O
+Fonte: pacote do original recebido em 16/10/2026 (fora do git, em `original/`: tem dados reais). O
 `timbrador.html` traz **o gerador Python original inteiro** (linhas 194–2282,
 `<script type="text/plain" id="gerador-python">`, 2.087 linhas) além do núcleo
 JS da página. Pela regra do CLAUDE.md, esse Python manda em regra e formato do
@@ -51,10 +51,10 @@ Legenda: **O** = original · **A** = atual (`gerar_documento.py`, 1.295 linhas).
 ## 3. Dados fixos no original que precisam ir para o `marca.json`
 
 `EMPRESAS` (com `grupo`, `sem_logo` e empresa aposentada), `EMPRESAS_ATIVAS`,
-`AREAS`/`AREAS_ATIVAS`, `TIPOS_ATIVOS`, código da política (`GRP-POL-ADM-001`),
-nome da lista mestra, `NS_FICHA` (`urn:ciclonorte:timbrador:ficha`), prefixo
-`CN_LOGO|` dos logos, siglas fixas em `RE_CODIGO`, empresa padrão `CN`, título e
-cor da página, `LOGOS` embutidos.
+`AREAS`/`AREAS_ATIVAS`, `TIPOS_ATIVOS`, código da política, nome da lista mestra,
+namespace da ficha (`NS_FICHA`, com o nome da organização), prefixo dos logos,
+siglas fixas em `RE_CODIGO`, empresa padrão, título e cor da página, `LOGOS`
+embutidos. Os valores reais ficam só em `original/`, fora do git.
 
 ## 4. O original diverge de si mesmo (página × Python embutido)
 
