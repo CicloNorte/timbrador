@@ -19,7 +19,7 @@ Empresas sem razão social ou documento cadastrados só emitem minuta ou documen
 python3 skills/timbrador/scripts/gerar_documento.py especificacao.json --marca marca.json --saida saida/ --pdf
 ```
 
-Outros comandos: `--ler` e `--atualizar` (documento já timbrado), `--obsoletar`, `--lista PASTA` (reserva e registra o número na publicação) e `--inventariar PASTA`. O formato da especificação está em `skills/timbrador/SKILL.md` (seção 6). Requer só Python 3.8+. LibreOffice e `pdftotext` são opcionais: numeram o sumário e geram o PDF de conferência (`TIMBRADOR_SOFFICE` define outro comando para o LibreOffice).
+Outros comandos: `--ler` e `--atualizar` (documento já timbrado), `--obsoletar`, `--lista PASTA` (reserva e registra o número na publicação), `--inventariar PASTA`, `--anexo ARQUIVO` (anexos externos, com SHA-256, numa pasta com o código do documento) e `--rodada` (relatório de condução de projeto, uma rodada por versão). Assinatura entra só pela página: o gerador guarda os envolvidos como assinaturas previstas na ficha. O formato da especificação está em `skills/timbrador/SKILL.md` (seção 6). Requer só Python 3.8+. LibreOffice e `pdftotext` são opcionais: numeram o sumário e geram o PDF de conferência (`TIMBRADOR_SOFFICE` define outro comando para o LibreOffice).
 
 ## Página no navegador
 
@@ -30,6 +30,8 @@ python3 skills/timbrador/scripts/gerar_documento.py --embutir-logos marca.json -
 ```
 
 Quem tem manual de marca pode acrescentar ao `marca.json` um `visual` com as fontes (TrueType, embutidas no .docx) e as cores de texto, títulos e realce; a página também se veste com ele (ver `skills/timbrador/SKILL.md`). O documento sai igual ao do gerador. Diferenças só de ambiente: o sumário sai sem números de página (o Word numera ao abrir, quando pergunta se deve atualizar os campos), a escolha automática entre assinaturas em linhas e em tabela é estimada (o gerador renderiza com o LibreOffice) e blocos `figura` não entram (o gerador lê a imagem do disco). Com a pasta dos documentos conectada (Chrome/Edge), a página reserva o número, grava o .docx na pasta do tipo e atualiza o `lista-mestra.json`.
+
+A página também cuida do campo Projeto (o documento vai para `Projetos/Nome`), dos anexos externos, do relatório de condução de projeto e guarda um rascunho do que está na tela se a página for recarregada.
 
 No Windows, `pagina/Abrir-Timbrador.cmd` abre a página no Edge ou no Chrome, e `pagina/Inventariar.cmd` (arraste a pasta dos documentos sobre ele) monta o `lista-mestra.json` do que já existe, sem Python. Deixe o `marca.json` na mesma pasta dos scripts.
 

@@ -11,7 +11,15 @@ if ! command -v node >/dev/null || ! node -e 'require("jsdom")' 2>/dev/null; the
 fi
 rm -rf "$saida"; mkdir -p "$saida/pagina" "$saida/gerador"
 python3 "$ger" --embutir-logos "$raiz/testes/marca.teste.json" --saida "$saida/marca.json" >/dev/null || exit 1
-specs=("$raiz/testes/espec-curto.json" "$raiz/testes/espec-longo.json")
+# documento de grupo com a caixa "Com assinatura": pelos dois caminhos, os envolvidos viram assinaturas previstas
+python3 - "$raiz/testes/espec-curto.json" "$saida/grupo.json" <<'PY0'
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+d.update(empresa="GTESTE", estado="EM_APROVACAO", com_assinatura=True, assinatura_formato="tabela",
+         envolvidos=[{"nome": "Ana Teste", "cargo": "Diretora", "papel": "Aprovou"}])
+json.dump(d, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)
+PY0
+specs=("$raiz/testes/espec-curto.json" "$raiz/testes/espec-longo.json" "$saida/grupo.json")
 node "$raiz/testes/pagina.js" "$saida/marca.json" "$saida/pagina" "${specs[@]}" >/dev/null || { echo "  FALHA página não gerou"; exit 1; }
 # sem LibreOffice para o gerador: a página não numera o sumário, então o gerador também não
 for s in "${specs[@]}"; do TIMBRADOR_SOFFICE=false python3 "$ger" "$s" --marca "$raiz/testes/marca.teste.json" --saida "$saida/gerador" >/dev/null; done
@@ -56,4 +64,33 @@ for f in "$saida"/pagina/*.docx; do
   if python3 "$raiz/testes/comparar_docx.py" "$f" "$saida/gerador/$n" > "$saida/.log"; then echo "  ok    $n"
   else echo "  FALHA $n"; sed 's/^/        /' "$saida/.log"; falhas=$((falhas + 1)); fi
 done
+# relatório de condução: o gerador abre e publica duas rodadas; a página lê os arquivos dele, confere o SHA-256 das
+# rodadas e acrescenta uma; o gerador relê o resultado da página e aceita a rodada seguinte
+rel="$saida/rel"; mkdir -p "$rel/docs" "$rel/pagina"
+marca="$raiz/testes/marca.teste.json"
+python3 - "$raiz/testes/espec-rel.json" "$rel" <<'PY3'
+import json, sys, os
+rel = json.load(open(sys.argv[1], encoding="utf-8")); d = sys.argv[2]
+json.dump({"empresa": "ACME", "tipo": "PLN", "area": "ECO", "numero": 1, "titulo": "Loja nova no marketplace", "projeto": "Loja Nova",
+           "estado": "OFICIAL", "aprovado_por": "Fulano de Tal", "data_aprovacao": "01/10/2026", "elaborado_por": "Fulano de Tal",
+           "corpo": [{"t": "h1", "texto": "Objetivo"}, {"t": "p", "texto": "Abrir a loja."}]}, open(f"{d}/plano.json", "w"), ensure_ascii=False)
+json.dump({"data": "12/10/2026", "feito": "50 anúncios cadastrados.", "avanco": "sim",
+           "compromisso": {"oque": "Ativar frete", "quem": "Logística", "ate": "19/10/2026"}}, open(f"{d}/r1.json", "w"), ensure_ascii=False)
+json.dump({"tipo": "encerramento", "data": "20/10/2026", "feito": "Loja aberta.", "termo": "ACME-TER-ECO-002/2026", "situacao": "concluído"},
+          open(f"{d}/fim.json", "w"), ensure_ascii=False)
+json.dump({"data": "25/10/2026", "feito": "Frete ativado.", "avanco": "sim", "compromisso": {"oque": "Revisar preços", "quem": "Comercial", "ate": "01/11/2026"}},
+          open(f"{d}/r3.json", "w"), ensure_ascii=False)
+PY3
+vig() { ls "$rel/docs"/ACME-REL-ECO-001_v*_OFICIAL_*.docx | sort -V | tail -1; }
+{ python3 "$ger" "$rel/plano.json" --marca "$marca" --saida "$rel/docs" --lista "$rel/docs" &&
+  python3 "$ger" "$raiz/testes/espec-rel.json" --marca "$marca" --saida "$rel/docs" --lista "$rel/docs" &&
+  python3 "$ger" --marca "$marca" --atualizar "$(vig)" --rodada "$rel/r1.json" --json-saida "$rel/v11.json" &&
+  python3 "$ger" "$rel/v11.json" --marca "$marca" --saida "$rel/docs" --lista "$rel/docs" && v11="$(vig)" && cp "$v11" "$rel/v11.docx" &&
+  python3 "$ger" --marca "$marca" --atualizar "$v11" --rodada "$rel/fim.json" --json-saida "$rel/v12.json" &&
+  python3 "$ger" "$rel/v12.json" --marca "$marca" --saida "$rel/docs" --lista "$rel/docs"; } > "$saida/.log" 2>&1 \
+  && node "$raiz/testes/pagina_rel.js" "$saida/marca.json" "$rel/v11.docx" "$(vig)" "$rel/docs/lista-mestra.json" "$rel/pagina" >> "$saida/.log" 2>&1 \
+  && python3 "$ger" --marca "$marca" --atualizar "$rel/pagina/rel.docx" --rodada "$rel/r3.json" --json-saida "$rel/v13.json" >> "$saida/.log" 2>&1 \
+  && python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d['versao']=='1.3' and len(d['rodadas'])==4 else 1)" "$rel/v13.json" \
+  && echo "  ok    relatório de condução: página e gerador leem e acrescentam rodadas um do outro" \
+  || { echo "  FALHA relatório de condução página × gerador"; sed 's/^/        /' "$saida/.log"; falhas=$((falhas + 1)); }
 exit $falhas

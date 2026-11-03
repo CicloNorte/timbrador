@@ -14,9 +14,12 @@ const w = dom.window, $ = id => w.document.getElementById(id);
   $("marca-usar").click();
   if (w.document.body.classList.contains("sem-marca")) throw new Error("a página não aceitou a marca: " + $("msg").textContent);
   fs.mkdirSync(saida, { recursive: true });
+  // o mesmo caminho do gerar() do gerador: relatório de condução, assinaturas adiadas, anexos e assinaturas
   const gerar = w.eval(`(spec => { const { erros, avisos } = validar(spec); if (erros.length) return { erros };
     for (const b of spec.corpo || []) if (b.t === "local_data" && !b.data) b.data = spec.data_emissao;
-    const blob = gerarDocx(spec, montarAssinaturas(spec.corpo || [], spec)); return { blob, nome: nomeArquivo(spec) }; })`);
+    if (spec.tipo === "REL" && (spec.rodadas || []).length) spec.corpo = corpoRel(spec.corpo, spec);
+    if (spec.estado !== "OBSOLETO") adiarAssinaturas(spec);
+    const blob = gerarDocx(spec, montarAssinaturas(montarAnexos(spec.corpo || [], spec), spec)); return { blob, nome: nomeArquivo(spec) }; })`);
   for (const arq of specs) {
     const r = gerar(w.JSON.parse(fs.readFileSync(arq, "utf8")));
     if (r.erros) throw new Error(`${arq}: ${r.erros.map(e => e.msg).join(" ")}`);

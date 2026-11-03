@@ -53,8 +53,8 @@ Depois, gere a versão de arquivo único com `--embutir-logos marca.json --saida
 2. **Classificar**: empresa, tipo (Quadro A), área (Quadro B), estado (seção 3). Pergunte só o que não dá para deduzir: empresa, estado desejado, número reservado na lista mestra, signatários, aprovador. Sem resposta: estado **MINUTA**, número vazio (sai **XXX**) e diga isso no final.
 3. **Adequar o texto** às regras de redação (seção 5). Não invente fato, data, valor, nome ou cláusula: o que faltar vira `[definir]`.
 4. **Escrever a especificação JSON** (seção 6) em arquivo de trabalho; figuras com caminho relativo a esse arquivo.
-5. **Gerar**: `python3 scripts/gerar_documento.py especificacao.json --marca marca.json --saida PASTA/ --pdf` (o nome do arquivo sai no padrão). Se o LibreOffice do ambiente precisar de um wrapper, informe o comando em `TIMBRADOR_SOFFICE`. Na publicação (OFICIAL), passe `--lista PASTA_DOS_DOCUMENTOS`: o gerador reserva o próximo número livre, recusa código repetido e registra o documento no `lista-mestra.json`. Minuta e em aprovação não reservam número nem mexem na lista.
-6. **Tratar erros e avisos**: o gerador recusa OFICIAL sem `aprovado_por`, `data_aprovacao`, número ou dados da empresa, e OBSOLETO sem substituto ou motivo. Não contorne: rebaixe o estado ou peça o dado. Repasse os avisos relevantes.
+5. **Gerar**: `python3 scripts/gerar_documento.py especificacao.json --marca marca.json --saida PASTA/ --pdf` (o nome do arquivo sai no padrão). Se o LibreOffice do ambiente precisar de um wrapper, informe o comando em `TIMBRADOR_SOFFICE`. Na publicação (OFICIAL), passe `--lista PASTA_DOS_DOCUMENTOS`: o gerador reserva o próximo número livre, recusa código repetido e registra o documento no `lista-mestra.json`. Minuta e em aprovação não reservam número nem mexem na lista. Arquivos que acompanham o documento (conversa exportada, planilha, foto) entram com `--anexo ARQUIVO` (repetível): veja "Anexos externos" na seção 4.
+6. **Tratar erros e avisos**: o gerador recusa OFICIAL sem `aprovado_por`, `data_aprovacao`, número ou dados da empresa, OBSOLETO sem substituto ou motivo, plano (PLN) sem `projeto` e as regras do relatório de condução (seção 4). Não contorne: rebaixe o estado ou peça o dado. Repasse os avisos relevantes.
 7. **Conferir o visual** quando o PDF sair: `pdftoppm -png -r 60` e olhe a primeira página e uma interna (faixa, bloco de controle, logo no rodapé, borda, marca d'água, tabelas cortadas, títulos órfãos). Sem LibreOffice, o sumário do longo sai sem números e o Word pede para atualizar os campos ao abrir; avise.
 8. **Entregar** o .docx (na pasta conectada, se houver, ao lado da origem) com uma linha: empresa, tipo, código, versão, estado e pendências (`[definir]`, número XXX, aprovação).
 
@@ -78,7 +78,12 @@ Depois, gere a versão de arquivo único com `--embutir-logos marca.json --saida
 - `--ler DOCX --json-saida espec.json` devolve a especificação (ficha + corpo relido do arquivo) para reformatar ou corrigir.
 - `--atualizar DOCX --mudanca conteudo|correcao --o-que-mudou "..." --json-saida nova.json` prepara a próxima versão: de um oficial X.Y sai (X+1).0-r1 ou X.(Y+1)-r1 em MINUTA, com `substitui` e o histórico; de um não oficial, a rodada seguinte. Edite só o corpo e gere; não mexa no bloco `anterior`. Ao gerar a nova versão como OFICIAL, sai também a cópia OBSOLETO da anterior.
 - `--obsoletar DOCX --substituido-por "CÓDIGO vX.Y"` gera a cópia obsoleta de um oficial.
-- `--inventariar PASTA [--conferir]` varre a pasta dos documentos (pula `Obsoletos`) e monta ou confere a lista mestra.
+- `--inventariar PASTA [--conferir]` varre a pasta dos documentos e monta ou confere a lista mestra. `Modelos` fica fora; `Obsoletos` é lida, mas só decide a entrada de um código que não tem mais versão em uso, e o relatório avisa oficial que já tem cópia obsoleta, mais de uma versão oficial em uso, cópia obsoleta fora de `Obsoletos`, documento de projeto fora da pasta do projeto e entrada da lista cujo arquivo sumiu.
+- `--atualizar REL.docx --rodada rodada.json`: acrescenta uma rodada ao relatório de condução (ver abaixo).
+
+**Projeto**: documento de projeto, de qualquer tipo, leva `"projeto": "Nome"` (vai para a ficha, a lista mestra e a pasta `Projetos/Nome`). Plano (PLN) sem projeto é recusado.
+
+**Anexos externos**: `--anexo ARQUIVO` (repetível) põe o documento e os anexos numa pasta com o código (minuta: código com XXX e o título), com os nomes `Anexo 01 – nome original`; o documento lista os anexos antes do local e data, com tamanho e SHA-256. Arquivo repetido entra uma vez. Na nova versão (`--atualizar`), os anexos registrados na ficha precisam estar na pasta com o mesmo SHA-256, senão o gerador recusa. Não confunda com `anexos` (anexos ABNT, dentro do documento longo).
 
 ## 4. Identificação
 
@@ -98,6 +103,28 @@ Quadro A – Tipos padrão (a variante define o formato; `tipos_extra` do marca.
 
 Quadro B – Áreas padrão (substituíveis por `areas` no marca.json): ADM administrativo · DIR diretoria · FIN financeiro · FIS financeiro e fiscal · JUR jurídico · RH recursos humanos · VEN vendas e comercial · ECO e-commerce e marketplaces · EST estoque · EXP expedição · CMP compras · OFC oficina e assistência técnica · MKT marketing · TI tecnologia. Use só as áreas ativas que o `--checar-marca` conta; se nada servir, use a mais próxima e avise (ou proponha incluir em `areas_extra`).
 
+### Relatório de condução de projeto (REL com rodadas)
+
+Um REL com `rodadas` registra a condução de um projeto, reunião a reunião. REL sem `rodadas` continua sendo um relatório comum.
+
+- **Um por projeto, com o número do plano**: o do `ACME-PLN-ECO-001` é o `ACME-REL-ECO-001`. O número é herdado, não reservado, e o relatório só se abre com o plano **oficial** na lista mestra: sempre gere com `--lista`.
+- **Sempre OFICIAL, pela coordenação do projeto** (`aprovado_por`), sem minuta nem em aprovação. A abertura é a v1.0, com a rodada 0 (`"tipo": "abertura"`, início da execução); cada rodada publicada é a versão seguinte (1.1, 1.2…).
+- **Só se acrescentam linhas.** As rodadas ficam na ficha e o Quadro de rodadas do corpo (cabeçalho `Nº · Data · O que se fez · Compromisso seguinte · Avanço`) é refeito a partir delas; se o corpo não tiver o quadro, a seção "Rodadas" entra no fim. A lista mestra guarda o SHA-256 de cada rodada, e o gerador recusa a versão nova se uma rodada publicada mudou (no Word ou na ficha) ou se o arquivo não é a versão vigente. Erro se corrige numa rodada nova, do tipo `correcao`.
+- **Sem cópia obsoleta**: a versão nova contém a anterior inteira (`--obsoletar` recusa REL). Oriente a retirar a versão anterior da pasta.
+- **Três rodadas seguidas sem avanço**: o gerador avisa que a parada do projeto pode ser declarada; declarar é decisão da coordenação, registrada como rodada `parada`.
+- **Encerramento**: a última rodada cita o termo de encerramento (TER); depois dela, o relatório não recebe rodadas.
+
+Rodada (`--rodada`; sem `n` e `data`, o gerador põe o próximo número e a data de hoje):
+
+| Campo | Quando |
+|---|---|
+| `n`, `data` (dd/mm/aaaa), `tipo`, `feito` | sempre; `tipo`: `abertura` (só a 0), `rodada`, `replanejamento`, `parada`, `retomada`, `correcao`, `encerramento` |
+| `compromisso`: `{"oque", "quem", "ate"}` | obrigatório em `abertura`, `rodada`, `replanejamento` e `retomada` |
+| `avanco`: `"sim"`, ou `"nao"` com `travou` e `depende` | obrigatório em `rodada` |
+| `plano_versao` · `corrige` · `termo` e `situacao` (`concluído`/`cancelado`) | `replanejamento` · `correcao` · `encerramento` |
+
+Exemplo de abertura: `testes/espec-rel.json`. Na página, o relatório novo se abre marcando "Relatório de condução de projeto"; um REL com rodadas abre no modo **Acrescentar rodada**, com as rodadas publicadas travadas.
+
 ## 5. Redação e ABNT (o gerador cuida da formatação; você cuida do conteúdo)
 
 - Linguagem formal, impessoal, frases diretas. Datas dd/mm/aaaa; horas 07h30; valores R$ 1.234,56.
@@ -106,7 +133,7 @@ Quadro B – Áreas padrão (substituíveis por `areas` no marca.json): ADM admi
 - **Tabela** (dados numéricos, laterais abertas) × **Quadro** (texto, fechado): sempre `titulo`; sem `fonte`, o gerador escreve "Elaborado pela empresa (AAAA).". Cite no texto ("conforme Quadro 1").
 - **Citações** (NBR 10520:2023): autor-data com sobrenome só com inicial maiúscula – (Silva, 2025, p. 10). Mais de 3 linhas → bloco `citacao`.
 - **Referências** (NBR 6023:2025) em `referencias` (o gerador ordena): `SOBRENOME, Nome. **Título**: subtítulo. Local: Editora, ano.`; online acrescenta `Disponível em: URL. Acesso em: 15 set. 2026.`
-- Documento com assinatura: use `com_assinatura` e `envolvidos` (seção 6); o gerador põe no fim o local, a data de emissão e as assinaturas, e troca as linhas por tabela quando elas ficariam sozinhas numa página. Documento longo oficial: a aprovação vai na folha de controle automaticamente.
+- **Assinatura entra só pela página** (caixa "Com assinatura", que põe no fim o local, a data e as assinaturas e troca as linhas por tabela quando elas ficariam sozinhas numa página). O gerador não põe assinatura em documento nenhum: tira do corpo o bloco `assinaturas` (e o local e data que o antecede) e guarda essas assinaturas e os `envolvidos` como `assinaturas_previstas` na ficha; ao abrir o arquivo na página, eles já vêm preenchidos. Diga isso ao usuário quando o documento pedir assinatura. Documento longo oficial: a aprovação vai na folha de controle automaticamente.
 - Não repita razão social e documento da emissora em `identificacao`; nas assinaturas eles continuam valendo.
 - Destaque: `**negrito**`, `*itálico*`, `***ambos***` dentro de qualquer texto; `\n\n` separa parágrafos.
 
@@ -118,7 +145,7 @@ Quadro B – Áreas padrão (substituíveis por `areas` no marca.json): ADM admi
   "tipo": "POP", "area": "ECO", "numero": 3, "ano": 2026,
   "titulo": "Cadastro de anúncios", "subtitulo": "opcional", "titulo_curto": "opcional, rodapé das páginas internas",
   "estado": "MINUTA", "versao": "1.0-r1", "data_emissao": "15/09/2026",
-  "classificacao": "Interno", "area_nome": "opcional, sobrescreve o nome da área",
+  "classificacao": "Interno", "area_nome": "opcional, sobrescreve o nome da área", "projeto": "opcional; obrigatório no PLN",
   "elaborado_por": "", "revisado_por": "", "aprovado_por": "", "cargo_aprovador": "", "data_aprovacao": "",
   "vigencia": "", "substitui": "", "substituido_por": "", "motivo_obsoleto": "",
   "identificacao": [["Destinatário", "..."], ["Assunto", "..."]],
@@ -132,7 +159,7 @@ Quadro B – Áreas padrão (substituíveis por `areas` no marca.json): ADM admi
 }
 ```
 
-`identificacao` só no curto. `historico`, `sumario`, `referencias`, `glossario`, `apendices`, `anexos` só no longo (sem `historico`, o gerador cria a linha de emissão inicial). `variante` ("curto"/"longo") é deduzida do tipo; informe só para forçar.
+`identificacao` só no curto. `historico`, `sumario`, `referencias`, `glossario`, `apendices`, `anexos` só no longo (sem `historico`, o gerador cria a linha de emissão inicial). `variante` ("curto"/"longo") é deduzida do tipo; informe só para forçar. `com_assinatura` e `envolvidos` não viram assinatura no gerador: ficam como `assinaturas_previstas` (seção 5). O relatório de condução acrescenta `rodadas` (seção 4).
 
 Blocos de `corpo`:
 
@@ -142,19 +169,19 @@ Blocos de `corpo`:
 | `{"t":"p","texto":"..."}` | `sem_recuo`, `alinhar` ("center", "right") |
 | `{"t":"alineas","itens":["...;", {"texto":"...;","sub":["...;"]}, "..."]}` | mesma forma com `"t":"numerada"`, `"checklist"` ou `"marcadores"` |
 | `{"t":"tabela","tipo":"Tabela"\|"Quadro","titulo":"","cabecalho":[],"linhas":[[]],"larguras":[pesos],"alinhamento":["left","right"],"fonte":"","nota":""}` | |
-| `{"t":"figura","caminho":"/caminho/img.png","titulo":"","fonte":"","largura_cm":14,"tipo":"Figura"\|"Gráfico"}` | PNG ou JPEG; caminho absoluto ou relativo à pasta de onde o gerador roda |
+| `{"t":"figura","caminho":"/caminho/img.png","titulo":"","fonte":"","largura_cm":14,"tipo":"Figura"\|"Gráfico"}` | PNG ou JPEG; caminho absoluto ou relativo à pasta da especificação |
 | `{"t":"citacao","texto":"...","fonte":"(Silva, 2025, p. 10)."}` | |
 | `{"t":"nota","texto":"...","rotulo":"Nota"}` | |
 | `{"t":"destaque","texto":"...","rotulo":"Importante","nivel":"info"\|"atencao"\|"erro"}` | |
 | `{"t":"campos","itens":[["Rótulo","valor"]],"rotulo_cm":4}` | pares rótulo/valor |
 | `{"t":"local_data","data":"27/08/2026"}` | escreve "Cidade da empresa, 27 de agosto de 2026." (sem `data`, usa a emissão) |
-| `{"t":"assinaturas","itens":[{"nome":"","cargo":"","papel":"","documento":""}],"formato":"linhas"\|"tabela"}` | prefira `com_assinatura` + `envolvidos` |
+| `{"t":"assinaturas","itens":[{"nome":"","cargo":"","papel":"","documento":""}],"formato":"linhas"\|"tabela"}` | no gerador vira `assinaturas_previstas` (seção 5) |
 | `{"t":"codigo","texto":"linha1\nlinha2"}` · `{"t":"quebra"}` | |
 
 ## 7. Cuidados
 
 - Um documento por arquivo. Vários atos (ex.: três advertências) = vários documentos com números próprios.
-- Documento de terceiros ou de sistemas (nota fiscal, boleto, relatório do ERP) não recebe o timbrado; se precisar, entra como `anexos` de um documento da empresa.
+- Documento de terceiros ou de sistemas (nota fiscal, boleto, relatório do ERP) não recebe o timbrado; se precisar, entra como anexo externo (`--anexo`) de um documento da empresa.
 - Ao reformatar documento existente, preserve o sentido e os dados; mudanças de conteúdo vão para o `historico` e para o resumo final.
 - No Word, se o texto for editado depois, clique com o botão direito no sumário → Atualizar campo.
 - As margens são parte do padrão: não as altere no Word (inclusive na tela de impressão, onde escolher "Estreitas" muda a seção atual).
