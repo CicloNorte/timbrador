@@ -1,5 +1,5 @@
 {
-  "_instrucoes": "Marca FICTÍCIA, só para os testes. Não é marca de cliente. ACME tem cadastro completo (emite OFICIAL); SEMLG está incompleta e sem logo (só minuta e em aprovação); GT é o grupo (sem documento, rodapé com os logos das empresas); VELHA está aposentada (só para ler documentos antigos).",
+  "_instrucoes": "Marca FICTÍCIA, só para os testes de fumaça. Não é marca de cliente. ACME tem cadastro completo (emite OFICIAL); SEMLG está incompleta e sem logo (só emite minuta ou em aprovação); PF usa CPF; VELHA está aposentada (só versiona documento antigo); GTESTE é o documento do grupo (sem documento, rodapé com as logos das empresas ativas).",
   "organizacao": "Grupo de Teste",
   "empresa_padrao": "ACME",
   "politica": {
@@ -27,23 +27,48 @@
       "cor": "8C3B2E"
     },
     {
-      "sigla": "GT",
-      "marca": "Grupo de Teste",
-      "razao_social": "Grupo de Teste",
+      "sigla": "PF",
+      "marca": "Consultoria PF",
+      "razao_social": "Maria Exemplo",
+      "documento_rotulo": "CPF",
+      "documento": "000.000.000-00",
       "cidade": "Campinas – SP",
-      "cor": "4D4D4D",
-      "grupo": true
+      "cor": "2E6B30",
+      "logo": "../skills/timbrador/assets/logo-exemplo.png"
     },
     {
       "sigla": "VELHA",
-      "marca": "Antiga",
-      "razao_social": "[definir]",
-      "documento": "[definir]",
+      "marca": "Marca Antiga",
+      "razao_social": "Antiga Ltda",
+      "documento": "00.000.000/0002-00",
       "cidade": "Campinas – SP",
       "cor": "555555",
-      "aposentada": true
+      "ativa": false
+    },
+    {
+      "sigla": "GTESTE",
+      "marca": "Grupo de Teste",
+      "grupo": true,
+      "cidade": "Campinas – SP",
+      "cor": "4D4D4D"
     }
   ],
   "areas_extra": {},
-  "tipos_extra": {}
+  "tipos_extra": {},
+  "areas_ativas": [
+    "ADM",
+    "RH",
+    "ECO",
+    "TI"
+  ],
+  "tipos_ativos": [
+    "RO",
+    "CI",
+    "TER",
+    "PRO",
+    "POP",
+    "POL",
+    "REG",
+    "PLN"
+  ]
 }

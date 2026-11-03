@@ -1,30 +1,26 @@
-// Gera pela página (timbrador.html, no Chromium sem janela) o mesmo documento de uma especificação JSON.
-// Uso: node testes/pagina.js PAGINA_COM_MARCA.html PAGINA_SEM_MARCA.html MARCA_PORTATIL.json ESPEC.json PASTA_SAIDA
-// Confere também que a página sem marca só mostra o bloco da marca e que ela aceita o marca.json carregado.
-const { chromium } = require("playwright");
-const fs = require("fs");
+// Abre pagina/timbrador.html num DOM (jsdom), cola o marca.json e gera cada especificação pelo núcleo da página,
+// do jeito que o botão Gerar faz. Uso: node testes/pagina.js MARCA_COM_LOGOS_EMBUTIDOS SAIDA espec.json [...]
+const fs = require("fs"), path = require("path");
+const { JSDOM, VirtualConsole } = require("jsdom");
+const [marcaArq, saida, ...specs] = process.argv.slice(2);
+const vc = new VirtualConsole();
+vc.on("jsdomError", e => { console.error("erro na página:", e.message); process.exitCode = 1; });
+const dom = new JSDOM(fs.readFileSync(path.join(__dirname, "..", "pagina", "timbrador.html"), "utf8"), {
+  runScripts: "dangerously", url: "https://timbrador.local/", virtualConsole: vc,
+  beforeParse(w) { Object.assign(w, { Blob, File, TextEncoder, TextDecoder, DecompressionStream, Response }); } });
+const w = dom.window, $ = id => w.document.getElementById(id);
 (async () => {
-  const [pagMarca, pagVazia, marca, espec, saida] = process.argv.slice(2);
-  const nav = await chromium.launch();
-  const erros = [];
-  const abrir = async url => { const p = await nav.newPage(); p.on("pageerror", e => erros.push(e.message)); await p.goto("file://" + url); return p; };
-  const vazia = await abrir(pagVazia);
-  if (!(await vazia.$eval("#formulario", e => e.hidden))) erros.push("página sem marca mostrou o formulário");
-  await vazia.setInputFiles("#marca-arquivo", marca);
-  await vazia.waitForLoadState("load"); await vazia.waitForTimeout(300);
-  if (await vazia.$eval("#formulario", e => e.hidden)) erros.push("página não aceitou o marca.json carregado");
-  const p = await abrir(pagMarca);
-  const r = await p.evaluate(async spec => {
-    const conteudo = spec.corpo || []; delete spec.corpo;
-    const v = validar(spec);
-    if (v.erros.length) return { erro: v.erros.map(e => e.msg).join(" ") };
-    const u = new Uint8Array(await gerarDocx(spec, conteudo).arrayBuffer());
-    let bin = ""; for (const x of u) bin += String.fromCharCode(x);
-    return { nome: nomeArquivo(spec), b64: btoa(bin) };
-  }, JSON.parse(fs.readFileSync(espec, "utf8")));
-  await nav.close();
-  if (r.erro) erros.push("validar: " + r.erro);
-  else fs.writeFileSync(`${saida}/${r.nome}`, Buffer.from(r.b64, "base64"));
-  if (erros.length) { console.error(erros.join("\n")); process.exit(1); }
-  console.log(`${saida}/${r.nome}`);
-})();
+  $("marca-texto").value = fs.readFileSync(marcaArq, "utf8");
+  $("marca-usar").click();
+  if (w.document.body.classList.contains("sem-marca")) throw new Error("a página não aceitou a marca: " + $("msg").textContent);
+  fs.mkdirSync(saida, { recursive: true });
+  const gerar = w.eval(`(spec => { const { erros, avisos } = validar(spec); if (erros.length) return { erros };
+    for (const b of spec.corpo || []) if (b.t === "local_data" && !b.data) b.data = spec.data_emissao;
+    const blob = gerarDocx(spec, montarAssinaturas(spec.corpo || [], spec)); return { blob, nome: nomeArquivo(spec) }; })`);
+  for (const arq of specs) {
+    const r = gerar(w.JSON.parse(fs.readFileSync(arq, "utf8")));
+    if (r.erros) throw new Error(`${arq}: ${r.erros.map(e => e.msg).join(" ")}`);
+    fs.writeFileSync(path.join(saida, r.nome), Buffer.from(await r.blob.arrayBuffer()));
+    console.log(r.nome);
+  }
+})().catch(e => { console.error(e.message); process.exit(1); });

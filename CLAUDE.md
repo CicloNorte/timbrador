@@ -1,29 +1,25 @@
 # Timbrador (white label) — contexto do projeto
 
-Plugin do Claude e página de navegador que geram documentos `.docx` timbrados (papel timbrado + ABNT +
-controle documental), com a identidade visual e os dados cadastrais de qualquer organização vindos de um
-`marca.json`.
+Plugin do Claude que gera documentos `.docx` timbrados (papel timbrado + ABNT +
+controle documental), com a identidade visual e os dados cadastrais de qualquer
+organização vindos de um `marca.json`.
 
-O fluxo do Claude: lê o conteúdo bruto do usuário, classifica (empresa, tipo, área, estado), escreve uma
-especificação JSON e chama o gerador, que monta o `.docx` escrevendo WordprocessingML direto num zip. O fluxo
-do colaborador: abre `timbrador.html`, solta um `.docx`/`.txt`/`.md` pronto e a página monta o mesmo `.docx`
-no navegador. **Nada de `python-docx` ou `docx-js`**: a dependência zero é intencional. Gerador só com a
-biblioteca padrão do Python 3.8+; página num único HTML, sem bibliotecas.
+O fluxo: o Claude lê o conteúdo bruto do usuário, classifica (empresa, tipo,
+área, estado), escreve uma especificação JSON e chama o gerador, que monta o
+`.docx` escrevendo WordprocessingML direto num zip. **Nada de `python-docx` ou
+`docx-js`**: a dependência zero é intencional, para o plugin rodar em qualquer
+lugar. Só biblioteca padrão do Python 3.8+.
 
-## Origem
+## Estado atual
 
-O projeto foi regerado em 30/10/2026 a partir da versão mais recente do Timbrador original (página
-`timbrador.html` com o `gerar_documento.py` embutido), de uma organização real. O original é a referência de
-visual e de regra; tudo o que era da organização (empresas, CNPJs, logos, cores, siglas, nome do grupo, código
-da norma interna, namespace da ficha) saiu do código e passou a vir do `marca.json`.
-
-**O material original nunca entra no repositório** — nem no histórico. Se o usuário anexar de novo o zip ou
-a página original, trabalhe numa cópia fora do repositório e traga só código já sem dado de empresa
-(`grep -ri` pela razão social, CNPJ, siglas e cor antes de qualquer commit). Os scripts de PowerShell do
-original (`Inventariar.ps1`/`.cmd`) ficaram de fora: tinham as siglas fixas e repetem o `--inventariar`.
-
-Os commits `70a7137`…`3216b25` são o white label v1, escrito a partir da descrição da skill e não do código
-original; foi substituído pela regeração.
+O gerador **é o original** (o Python embutido no `timbrador.html`, recebido em
+20/10/2026), portado para white label: empresas, áreas e tipos ativos vêm do
+`marca.json`; do gerador anterior ficaram só `--marca`, `--checar-marca`,
+`--embutir-logos`, `--pdf`, `TIMBRADOR_SOFFICE` e `documento_rotulo` (CPF).
+A página de navegador também foi portada (20/10/2026): `pagina/timbrador.html`,
+sem nenhuma empresa fixa, lendo o mesmo `marca.json` e montando o .docx com um
+porte direto do gerador — o pacote sai igual (`testes/pagina.sh`). As
+divergências que motivaram o porte estão em `docs/divergencias-original.md`.
 
 ## Estrutura
 
@@ -31,13 +27,21 @@ original; foi substituído pela regeração.
 |---|---|
 | `.claude-plugin/plugin.json` | manifesto do plugin |
 | `README.md` | instruções de personalização para humanos |
-| `skills/timbrador/SKILL.md` | a norma: estados, códigos, ABNT, formato do JSON, comandos de controle |
-| `skills/timbrador/scripts/gerar_documento.py` | gerador (~2.500 linhas, só stdlib) |
-| `skills/timbrador/assets/timbrador.html` | página dos colaboradores; bloco `marca-embutida` vazio no repositório |
-| `skills/timbrador/assets/Abrir-Timbrador.cmd` | abre a página no Edge/Chrome (Windows) |
+| `skills/timbrador/SKILL.md` | a norma: estados, códigos, ABNT, formato do JSON |
+| `skills/timbrador/scripts/gerar_documento.py` | gerador (original portado), ~2.200 linhas, só stdlib |
 | `skills/timbrador/assets/marca.exemplo.json` | modelo de configuração |
 | `skills/timbrador/assets/logo-exemplo.png` | logo genérico do exemplo |
-| `testes/` | marca e especificações fictícias, teste de fumaça, comparação página × gerador |
+| `pagina/timbrador.html` | página de navegador (porte do original), lê o `marca.json` com logos embutidos |
+| `pagina/Inventariar.ps1` (+ `.cmd`) | inventário da pasta no Windows sem Python; lê o `marca.json` (`-Marca`, `TIMBRADOR_MARCA` ou ao lado do script) |
+| `pagina/Abrir-Timbrador.cmd` | abre a página no Edge ou no Chrome (os que gravam direto na pasta) |
+| `testes/` | marca e especificações fictícias + teste de fumaça + página × gerador |
+| `docs/divergencias-original.md` | original × gerador anterior, item a item |
+| `original/` (fora do git) | pacote recebido: `timbrador.html`, `.cmd`, `.ps1`; tem dados reais |
+
+`Timbrador-white-label-v1.zip` é a entrega original
+(md5 `128a94c59c82bdf24c2392a6b0a2f79d`); está no `.gitignore` porque o conteúdo
+já está versionado. O commit `70a7137` é esse estado intacto — a linha de base
+para qualquer diff contra o original.
 
 ## Comandos
 
@@ -45,71 +49,150 @@ original; foi substituído pela regeração.
 python3 skills/timbrador/scripts/gerar_documento.py espec.json --marca marca.json --saida saida/ --pdf
 python3 skills/timbrador/scripts/gerar_documento.py --checar-marca marca.json
 python3 skills/timbrador/scripts/gerar_documento.py --embutir-logos marca.json --saida marca_portatil.json
-python3 skills/timbrador/scripts/gerar_documento.py --montar-pagina marca.json --saida pasta/
-python3 skills/timbrador/scripts/gerar_documento.py --marca marca.json --ler doc.docx | --atualizar doc.docx --o-que-mudou "…"
-python3 skills/timbrador/scripts/gerar_documento.py --marca marca.json --inventariar PASTA [--conferir]
-bash testes/fumaca.sh   # marca, geração, travas, lista mestra, versões, XML e página × gerador
+python3 skills/timbrador/scripts/gerar_documento.py --ler|--atualizar|--obsoletar DOCX --marca marca.json ...
+python3 skills/timbrador/scripts/gerar_documento.py --inventariar PASTA --marca marca.json [--conferir]
+bash testes/fumaca.sh        # marca, curto/longo, travas, grupo, CPF, ciclo de vida, lista mestra, PDF, XML
+bash testes/pagina.sh        # página × gerador e editor da marca, pacote parte a parte (precisa de node + jsdom; pula sem eles)
 ```
 
-LibreOffice e `pdftotext` são **opcionais**: com eles o gerador descobre em que página cada título caiu e grava
-os números no sumário; sem eles o sumário sai sem números e o Word atualiza ao abrir. `TIMBRADOR_SOFFICE`
-troca o comando do LibreOffice. A comparação página × gerador do teste de fumaça precisa de Node com
-Playwright (`NODE_PATH=$(npm root -g)`); sem eles, é pulada.
+LibreOffice e `pdftotext` são **opcionais**: com eles o gerador converte para
+PDF, descobre em que página cada título caiu e grava os números no sumário; sem
+eles o sumário sai vazio e o Word atualiza ao abrir. `TIMBRADOR_SOFFICE` troca o
+comando do LibreOffice (necessário em sandboxes onde `soffice` precisa de
+wrapper).
 
-Nesta máquina estão instalados LibreOffice 24.2.7, poppler-utils 24.02, Node 22 e Playwright com Chromium.
+Nesta máquina os dois estão instalados (18/09/2026): LibreOffice 24.2.7
+(`soffice`) e poppler-utils 24.02 (`pdftotext`, `pdftoppm`). O caminho do PDF e
+da numeração do sumário **é** exercitado localmente — se o aviso "sumário sem
+números de página" reaparecer, alguma das duas sumiu do PATH.
+
+## No homeserver
+
+Esta máquina é o homeserver. `docker compose up -d` (na raiz) sobe o container
+`timbrador` (nginx:alpine, `restart: unless-stopped`) servindo `pagina/` em
+**127.0.0.1:8091**, com CSP que só deixa a página ler arquivos do próprio site
+(`deploy/nginx.conf`). O volume é a própria pasta `pagina/` do checkout: o que
+estiver no branch atual é o que está no ar. O acesso de fora é por um hostname
+público do túnel Cloudflare (configurado no painel, token no serviço
+`cloudflared`) apontando para `http://localhost:8091`; o HTTPS do túnel é o que
+deixa a página gravar direto na pasta dos documentos.
+
+**Marca padrão do site: mhdn** (atualizada em 03/11/2026). `pagina/marca.json`
+(fora do git, `.gitignore`) é a marca da mhdn, montada a partir do brandbook
+(claude.ai/artifact/RSANaxBgb5bQ7Rquwgbezz): logo = livro novo (`MHDN -logo.svg`)
++ assinatura `mhdn`, compostos nas proporções da horizontal antiga e rasterizados
+com resvg (o renderizador do ImageMagick desenha o M errado); cor `anil`
+#233F61; CPF, Rio Claro, política `MHDN-POL-ADM-001`, todas as áreas e tipos; e
+`visual` com os tokens do brandbook (tinta, anil, grafite, anil-claro; papel,
+papel-cartao e linha na página) e EB Garamond (títulos) + Newsreader (texto)
+embutidas. As fontes vieram dos woff2 do brandbook → TTF (wawoff2) com a tabela
+de nomes refeita para uma família por fonte (Regular, Italic e Bold = Garamond
+500 / Newsreader 600, peso marcado 700). Insumos e a versão anterior da marca
+estão em `saida/mhdn/` (fora do git). A página busca esse arquivo ao abrir e o usa enquanto o navegador não
+guardou uma marca própria (Editar/Importar guardam; "Usar a do site" volta). A
+mesma cópia está em `skills/timbrador/assets/marca.json` (também fora do git),
+que o gerador acha sozinho. **O `marca.json` do site é público** (tem o CPF):
+sem Cloudflare Access no hostname, qualquer um o baixa.
 
 ## Invariantes
 
-1. **O `marca.json` é a única coisa que varia entre organizações.** Empresas (sigla, marca, razão social,
-   documento e rótulo, cidade, cor, logo, `grupo`, `aposentada`), `empresa_padrao`, `organizacao`,
-   `politica`, `areas`/`areas_extra`, `tipos_extra`, `tipos_ativos`/`areas_ativas`. **Nenhum dado de
-   empresa pode voltar para o código** — nem para comentários e exemplos.
-2. **O visual é fixo e não se negocia com o conteúdo**: faixa de estado no topo (1,2 a 19,8 cm), bloco de
-   controle centralizado (código · versão · Página X de Y; situação; razão social · documento · cidade),
-   marca d'água nos estados não oficiais, borda preta a 1 cm do papel, rodapé com filete na cor da empresa e
-   logo, margens 3,3 (alto) / 2,0 (direita) / 3,2 ou 2,6 (base) / 3,0 (esquerda) cm.
-3. **As travas de estado são de segurança documental, não de validação.** Estados ativos: MINUTA,
-   EM_APROVACAO, OFICIAL, OBSOLETO (RASCUNHO e EM_REVISAO só para ler documentos antigos). OFICIAL exige
-   aprovador, data de aprovação, número e empresa com cadastro completo; OBSOLETO exige substituto ou motivo.
-   Empresa com `razao_social` ou `documento` em `[definir]` só emite MINUTA ou EM_APROVACAO. Número já usado
-   por outro título na lista mestra é recusado. Nunca contorne: rebaixe o estado ou peça o dado.
-4. **Dado que falta vira `[definir]`.** Não invente razão social, CNPJ, número, cláusula, data ou valor.
-5. **Gerador e página andam juntos.** Qualquer mudança de visual, de regra ou de formato da marca acontece
-   nos dois, e `testes/fumaca.sh` confere que o mesmo documento sai igual pelos dois caminhos. Em conflito,
-   vale a página para visual e o gerador para regra e formato do JSON.
-6. **Assinatura entra só pela página** (caixa "Com assinatura"); o gerador guarda os envolvidos como
-   `assinaturas_previstas` na ficha.
+1. **O `marca.json` é a única coisa que varia entre organizações.** Sigla, nome,
+   razão social, documento (CNPJ ou CPF), cidade, cor, logo, `grupo`, `ativa` —
+   mais `areas`, `areas_extra`, `areas_ativas`, `tipos_extra`, `tipos_ativos`,
+   `politica` e `visual` opcionais. **Nenhum dado de empresa pode voltar para o código.**
+2. **O visual é o do original e não se negocia com o conteúdo** (exceção, decidida
+   pelo usuário em 03/11/2026: o `visual` opcional do `marca.json` troca fontes e
+   cores de texto/títulos/realce; sem ele, nada muda — e nunca muda faixa, cores de
+   estado, borda, margens nem linhas de tabela): faixa de
+   estado de borda a borda e bloco de controle centralizado (código · versão ·
+   Página X de Y; frase do estado; razão social · documento · cidade), rodapé com
+   filete na cor da empresa e logo, borda preta a 1 cm do papel, marca d'água nos
+   estados não oficiais, margens esq. 3 · dir. 2 · sup. 3,3 · inf. 3,2 (curto e
+   capa) ou 2,6 (páginas internas do longo).
+3. **As travas de estado são de segurança documental, não de validação.**
+   OFICIAL exige aprovador, data de aprovação, número reservado e empresa com
+   cadastro completo; OBSOLETO exige substituto ou motivo. Empresa com
+   `razao_social` ou `documento` em `[definir]` só emite MINUTA ou
+   EM_APROVACAO (RASCUNHO e EM_REVISAO estão aposentados: só leitura). Nunca
+   contorne: rebaixe o estado ou peça o dado.
+4. **Dado que falta vira `[definir]`.** Não invente razão social, CNPJ, número,
+   cláusula, data ou valor.
+5. **Gerador e página andam juntos.** Qualquer mudança de visual, de regra ou de
+   formato da marca precisa acontecer nos dois, ou o documento gerado pelo
+   Claude deixa de ser igual ao gerado pela página. `testes/pagina.sh` confere.
 
-## Diferenças conhecidas entre página e gerador (herdadas do original)
+## A página (`pagina/timbrador.html`)
 
-Não aparecem nas especificações do teste, mas existem:
+Porte de `original/timbrador.html` (fora do git, com dados reais). Decisões do
+usuário (20/10/2026): o bloco `gerador-python` **saiu** da página; onde página e
+Python embutido divergiam, **o gerador venceu nos sete pontos** (ver seção 4 de
+`docs/divergencias-original.md`).
 
-- tabela **sem título**: a página não põe legenda nem fonte e, sem `tipo`, desenha Quadro; o gerador desenha
-  Tabela com legenda vazia e fonte padrão. (A página recebe tabelas sem título de textos lidos; o gerador,
-  de especificações escritas pelo Claude.)
-- sumário: a página só o põe com 3 ou mais títulos e sem números de página (o Word numera ao abrir); o
-  gerador sempre o põe e numera pelo LibreOffice.
-- OBSOLETO: a página pede `substituido_por`; o gerador aceita também `motivo_obsoleto`.
-- figuras do corpo: a página não as mantém ao reler um `.docx` (avisa); o gerador as extrai com `--pasta-midia`.
+- Núcleo (`<script id="nucleo">`): `carregarMarca()` é o `carregar_marca()` do
+  gerador; montagem (`montar`, `blocos`, estilos, numeração, ficha) é porte
+  linha a linha do Python — mesma ordem de ids, rels, mídia (`img1.png`),
+  `round()` com meio para o par (`arred`), ficha em `json.dumps` (`jsonPy`).
+  Mexeu num, mexa no outro e rode `testes/pagina.sh`.
+- O que não dá para portar: números de página do sumário (o Word atualiza ao
+  abrir), assinatura automática (a página estima a paginação; o gerador
+  renderiza), bloco `figura` (vira aviso). Logo só em data URI (`--embutir-logos`).
+- Leitura, lista mestra, inventário e pastas continuam os da página original,
+  com siglas genéricas (`[A-Z0-9]{2,6}`) e ficha `…timbrador:ficha`.
+- `visual` (opcional): `carregarVisual`/`lerVisual` nos dois lados; `sec()`,
+  `cor_texto()`/`corTexto()` e `realce()` devolvem o valor do original quando ele
+  não existe (sem `visual` a saída é byte a byte a de antes). Fontes embutidas:
+  `word/fontTable.xml` + `word/fonts/fontN.odttf` ofuscadas (ECMA-376 17.8.1), GUID
+  tirado do CRC32 da própria fonte, para página e gerador darem o mesmo pacote.
+  A interface também se veste com ele (cores em variáveis CSS, fontes via `FontFace`).
+  O editor da marca ainda não edita o `visual` (só preserva).
+- A marca é configurada na própria página (Marca → Configurar/Editar: organização,
+  política, empresas com logo por upload, áreas e tipos ativos e extras) e fica no
+  `localStorage` (`timbrador.marca`) **no formato do marca.json**, validada por
+  `carregarMarca`. Exportar baixa esse `marca.json` (logos em data URI), que
+  serve direto ao gerador; Importar/colar aceita um. Campos que o editor não
+  mostra (`areas`, `_instrucoes`) passam intactos.
 
-## Estado da validação (30/10/2026)
+`Inventariar.ps1` e os `.cmd` também foram portados (20/10/2026): empresa
+padrão, nome da organização, código da política e tipos extras vêm do
+`marca.json`; ficha `…timbrador:ficha`; siglas `[A-Z0-9]{2,6}`. Lista que já
+existe mantém o `lista_mestra`/`padrao` dela (como o gerador). Testado com
+PowerShell 7.4 no Linux contra `gerar_documento.py --inventariar`: lista mestra
+igual (ficha nova e antiga, cabeçalho, nome, Obsoletos pulado). Os `.cmd` estão
+em CRLF (`.gitattributes`).
 
-Coberto pelo teste de fumaça: marca (checar, embutir logos, montar página); curto em minuta, longo oficial,
-documento de grupo, empresa sem logo e incompleta em aprovação; travas (oficial sem aprovador, sem número,
-de empresa incompleta; obsoleto sem motivo; empresa fora da marca); lista mestra (registro e número
-repetido); `--ler`, `--atualizar` e geração da nova versão; XML bem formado; o mesmo curto e o mesmo longo
-gerados pela página (Chromium sem janela) e pelo gerador saem iguais, fora os números de página do sumário.
-A página sem marca mostra só o bloco da marca e aceita o `marca_portatil.json`. Conferência visual em PDF
-(LibreOffice) do curto, do longo, do grupo e da empresa sem logo.
+**Pendente:** no Chrome real só foram vistos a carga da marca e o editor (sem
+erro de console); falta gerar um documento e conectar a pasta por lá. O `.ps1`
+não rodou no Windows PowerShell 5.1.
 
-**Não coberto ainda:** interface da página além do carregamento da marca (pasta conectada, inventário,
-anexos, assinatura automática, rascunho), `--obsoletar`, `--inventariar` e `--anexo` no gerador, figuras
-JPEG grandes, tabelas que quebram entre páginas, documentos acima de ~30 páginas e a aparência real no Word
-(a conferência foi toda via LibreOffice).
+## Estado da validação
+
+Coberto pelo `fumaca.sh` (gerador portado, 20/10/2026): curto e longo; minuta,
+em aprovação, oficial; estados e empresa aposentados (aviso); empresa sem logo,
+incompleta, com CPF e de grupo; assinaturas em linhas e em tabela; título sem o
+nome do tipo; `--ler`, `--atualizar`, lista mestra (registro e número
+repetido), `--inventariar --conferir`, `--pdf`; XML bem formado. Conferência
+visual em PDF via LibreOffice em 20/10/2026: capa, folha de controle, sumário
+numerado e página interna do POP; CI do grupo com assinaturas e rodapé de logos.
+
+Página (20/10/2026, `testes/pagina.sh` e jsdom): curto e longo do teste, grupo,
+CPF, empresa incompleta, obsoleto por motivo, estado/tipo/área aposentados,
+assinaturas em linhas e em tabela, e um curto e um longo pela interface
+(texto colado + formulário + Gerar) — pacote igual ao do gerador parte a parte
+e PDFs idênticos pixel a pixel no LibreOffice.
+
+Visual (03/11/2026): regressão sem `visual` idêntica ao gerador anterior (6
+documentos); `testes/pagina.sh` com visual e fontes embutidas (DejaVu Serif do
+sistema); marca mhdn com visual igual página × gerador (25 e 28 partes); PDFs
+com Newsreader e EB Garamond embutidas (LibreOffice usa as fontes do .docx).
+
+**Não coberto ainda:** as fontes embutidas abertas no Word de verdade, `--obsoletar` e a cópia obsoleta automática, inventário
+gravando, `assinatura_formato` automático trocando para tabela, figuras JPEG grandes, tabelas que quebram entre páginas,
+apêndices com muitos níveis, documentos acima de ~30 páginas, e a aparência real
+no Word (a conferência foi toda via LibreOffice).
 
 ## Convenções
 
-- Documentos gerados (`.docx`, `.pdf`), `lista-mestra.json`, páginas montadas com marca e `marca.json` de
-  organização real **não entram no repositório** — ver `.gitignore`. Só `marca.exemplo.json` e as marcas
-  fictícias de `testes/` são versionados.
+- Documentos gerados (`.docx`, `.pdf`) e `marca.json` de organização real **não
+  entram no repositório** — ver `.gitignore`. Só `marca.exemplo.json` e as
+  marcas fictícias de `testes/` são versionados.
 - Mensagens de commit em português, no padrão conventional commits.

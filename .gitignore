@@ -1,6 +1,9 @@
-# --- Entregas originais: nunca entram (a última tem dados de organização real) ---
+# --- Entrega original (o conteúdo já está extraído e versionado) ---
 Timbrador*.zip
-Inventariar.*
+
+# --- Pacote original da página (timbrador.html e scripts) ---
+# Referência local para o porte: traz razão social, CNPJ e logos reais.
+/original/
 
 # --- Saídas do gerador ---
 # Documento gerado nunca entra no repositório: é produto, não fonte.
@@ -16,9 +19,6 @@ marca.json
 skills/timbrador/assets/marca.json
 *_portatil.json
 lista-mestra.json
-# Página montada com a marca embutida (--montar-pagina): só a do repositório, com o bloco vazio, é versionada.
-*.html
-!skills/timbrador/assets/timbrador.html
 
 # --- Python ---
 __pycache__/

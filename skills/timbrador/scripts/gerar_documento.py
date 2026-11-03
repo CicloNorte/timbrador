@@ -1,42 +1,59 @@
 #!/usr/bin/env python3
 """Timbrador white label: gera documentos no Padrão de Documentação Oficial (ABNT + papel timbrado).
 
-A identidade visual e os dados cadastrais vêm do marca.json (modelo em assets/marca.exemplo.json); o visual,
-as regras e a numeração são fixos e são os mesmos da página assets/timbrador.html.
-
 Uso:
-  python3 gerar_documento.py especificacao.json --marca marca.json [--saida PASTA/ ou arquivo.docx] [--pdf]
+  python3 gerar_documento.py especificacao.json --marca marca.json [--saida PASTA|arquivo.docx] [--pdf]
   python3 gerar_documento.py --checar-marca marca.json
   python3 gerar_documento.py --embutir-logos marca.json [--saida marca_portatil.json]
-  python3 gerar_documento.py --montar-pagina marca.json [--saida timbrador.html]
+  python3 gerar_documento.py --ler | --atualizar | --obsoletar DOCX --marca marca.json ...
+  python3 gerar_documento.py --inventariar PASTA --marca marca.json [--lista ...] [--conferir]
 
-Só usa a biblioteca padrão do Python 3.8+. LibreOffice (soffice) e pdftotext são opcionais: numeram as páginas
-do sumário e geram o PDF de conferência. TIMBRADOR_SOFFICE troca o comando do LibreOffice.
+Tudo o que varia entre organizações (empresas, razão social, documento, cidade, cor, logos, áreas, tipos
+ativos, código da política) vem do marca.json; nenhum dado de organização fica neste arquivo. Só usa a
+biblioteca padrão do Python; LibreOffice (soffice, ou o comando em TIMBRADOR_SOFFICE) e pdftotext são
+opcionais e servem para numerar as páginas do sumário e gerar o PDF de conferência.
 """
-import json, re, sys, os, zipfile, shutil, shlex, hashlib, subprocess, tempfile, argparse, datetime, unicodedata, base64
+import json, re, sys, os, zipfile, shutil, subprocess, tempfile, argparse, datetime, unicodedata, base64, shlex, struct
 from xml.sax.saxutils import escape
 
 EMU_CM = 360000
 TW_CM = 567
 INDEFINIDO = "[definir]"
-# Empresas: vêm do marca.json (carregar_marca). Campo None ainda não foi informado: aparece como [definir] e
-# impede o estado OFICIAL. Empresa "grupo" emite documento que vale para mais de uma empresa: o grupo não é pessoa
-# jurídica, então o cabeçalho traz só o nome, sem documento, e o rodapé leva os logos de todas as empresas ativas.
-# Empresa "aposentada" fica só para ler e versionar documentos emitidos antes.
+# Cadastro das empresas, preenchido por carregar_marca() a partir do marca.json. Campo vazio ou "[definir]"
+# vira None: aparece como [definir] e impede o estado OFICIAL.
 EMPRESAS = {}
+# Empresas oferecidas para documento novo (as com "ativa": false só servem para ler e versionar os antigos).
 EMPRESAS_ATIVAS = []
-# Empresas cujos logos formam o rodapé do documento do grupo, na ordem do marca.json.
+# Empresas cujas logos formam o rodapé do documento do grupo, na ordem do marca.json.
 EMPRESAS_DO_GRUPO = []
 EMPRESA_ID = None
 EMPRESA = {}
-EMPRESA_PADRAO = None
-MARCA = {"organizacao": "", "politica": {}}
+# Dados da organização (marca.json): nome, código da política, empresa padrão, áreas e tipos ativos.
+ORG = {"organizacao": "", "politica": "", "padrao": None, "areas_ativas": [], "tipos_ativos": []}
+# Visual opcional da organização ("visual" no marca.json): fontes e cores do documento. Sem ele, o documento
+# sai no visual do padrão original (Arial, texto preto, cinzas de apoio). As cores dos estados não mudam nunca.
+VISUAL = {}
+ESTILOS_FONTE = ("regular", "negrito", "italico", "negrito_italico")
+
+
+def sec(padrao):
+    """Cor de apoio (código, identificação, legendas): a cor_secundaria do visual, ou o cinza do original."""
+    return VISUAL.get("cor_secundaria") or padrao
+
+
+def cor_texto():
+    return VISUAL.get("cor_texto") or "000000"
+
+
+def realce():
+    """Fundo de cabeçalho de tabela e de rótulo de quadro."""
+    return VISUAL.get("cor_realce") or "F2F2F2"
 
 
 def definir_empresa(chave):
     global EMPRESA_ID, EMPRESA
     if chave not in EMPRESAS:
-        raise SystemExit(f"Empresa desconhecida: {chave}. Use uma de: {', '.join(EMPRESAS)} (marca.json).")
+        raise SystemExit(f"Empresa desconhecida: {chave}. Use uma de: {', '.join(EMPRESAS)}.")
     EMPRESA_ID, EMPRESA = chave, EMPRESAS[chave]
 
 
@@ -47,12 +64,12 @@ def dado(campo):
 def identificacao_empresa():
     if EMPRESA.get("grupo"):
         return EMPRESA["marca"]
-    partes = [EMPRESA["razao"] or EMPRESA["marca"], f'{EMPRESA["doc_rotulo"]} {dado("documento")}']
+    partes = [EMPRESA["razao"] or EMPRESA["marca"], f'{EMPRESA.get("documento_rotulo") or "CNPJ"} {dado("documento")}']
     if EMPRESA.get("cidade"): partes.append(EMPRESA["cidade"])
     return "  ·  ".join(partes)
 
 ESTADOS = {
-    # Aposentado: a minuta já cobre o texto que ainda não é oficial. Fica aqui só para ler
+    # Aposentado em 05/10/2026: a minuta já cobre o texto que ainda não é oficial. Fica aqui só para ler
     # e versionar documentos emitidos antes do corte; não é oferecido para documento novo.
     "RASCUNHO":   {"cor": "595959", "texto": "FFFFFF", "marca": "RASCUNHO", "claro": "E4E4E4",
                    "tarja": "RASCUNHO  ·  DOCUMENTO EM ELABORAÇÃO  ·  SEM VALIDADE OFICIAL",
@@ -63,7 +80,7 @@ ESTADOS = {
     "EM_APROVACAO": {"cor": "1F5FA8", "texto": "FFFFFF", "marca": "EM APROVAÇÃO", "claro": "D9E5F3",
                    "tarja": "EM APROVAÇÃO  ·  AGUARDANDO DECISÃO  ·  SEM VALIDADE OFICIAL",
                    "rodape": "Texto entregue a quem aprova. Sem validade oficial até a aprovação.", "rotulo": "Em aprovação"},
-    # Renomeado para EM_APROVACAO: "em revisão" sugeria que o documento oficial estivesse suspenso
+    # Renomeado para EM_APROVACAO em 08/10/2026: "em revisão" sugeria que o documento oficial estivesse suspenso
     # durante a revisão. Fica aqui só para ler e versionar os arquivos emitidos com o nome antigo.
     "EM_REVISAO": {"cor": "1F5FA8", "texto": "FFFFFF", "marca": "EM REVISÃO", "claro": "D9E5F3",
                    "tarja": "EM REVISÃO  ·  AGUARDANDO APROVAÇÃO  ·  SEM VALIDADE OFICIAL",
@@ -83,7 +100,9 @@ TIPOS_CURTOS = {"CI": "Comunicação Interna", "COM": "Comunicado", "OFI": "Ofí
                 "CTR": "Contrato", "PRO": "Proposta", "FOR": "Formulário", "REC": "Recibo"}
 TIPOS_LONGOS = {"MAN": "Manual", "POP": "Procedimento Operacional Padrão", "POL": "Política",
                 "REG": "Regulamento", "REL": "Relatório", "PLN": "Plano", "PRJ": "Projeto", "INS": "Instrução de Trabalho"}
-# Áreas padrão; o marca.json pode trocar ("areas") ou ampliar ("areas_extra") esta lista.
+
+# Áreas do padrão. O marca.json pode trocar a lista ("areas"), acrescentar ("areas_extra") e dizer quais são
+# oferecidas para documento novo ("areas_ativas"); as demais continuam valendo para ler documento antigo.
 AREAS = {"ADM": "Administrativo", "DIR": "Diretoria", "FIN": "Financeiro", "FIS": "Financeiro e fiscal", "JUR": "Jurídico",
          "RH": "Recursos humanos", "VEN": "Vendas e comercial", "ECO": "E-commerce e marketplaces", "EST": "Estoque",
          "EXP": "Expedição", "CMP": "Compras", "OFC": "Oficina e assistência técnica", "MKT": "Marketing", "TI": "Tecnologia"}
@@ -121,105 +140,160 @@ def dim_imagem(dados):
     raise ValueError("Imagem não suportada (use PNG ou JPEG)")
 
 
-def _vazio(v):
-    return v is None or str(v).strip() in ("", INDEFINIDO)
+def ler_fonte(ref, base):
+    """Fonte do visual: caminho (relativo ao marca.json) ou data URI base64 de uma TrueType (.ttf)."""
+    if str(ref).startswith("data:"):
+        dados = base64.b64decode(str(ref).split(",", 1)[1])
+    else:
+        caminho = ref if os.path.isabs(ref) else os.path.join(base, ref)
+        with open(caminho, "rb") as f:
+            dados = f.read()
+    if dados[:4] not in (b"\x00\x01\x00\x00", b"true"):
+        raise ValueError("não é uma fonte TrueType (.ttf)")
+    return dados
 
 
 def ler_imagem(ref, base):
-    """Logo ou figura: caminho (relativo a base) ou data URI base64. Confere se é PNG ou JPEG."""
+    """Logo do marca.json: caminho (relativo ao marca.json) ou data URI base64 de PNG/JPEG."""
     if str(ref).startswith("data:"):
-        dados = base64.b64decode(ref.split(",", 1)[1])
+        dados = base64.b64decode(str(ref).split(",", 1)[1])
     else:
-        with open(ref if os.path.isabs(ref) else os.path.join(base, ref), "rb") as f:
+        caminho = ref if os.path.isabs(ref) else os.path.join(base, ref)
+        with open(caminho, "rb") as f:
             dados = f.read()
     dim_imagem(dados)
     return dados
 
 
-def re_codigo():
-    """Código impresso no cabeçalho ("SIGLA-TIPO-ÁREA-NNN/AAAA · vX.Y"), com as siglas do marca.json."""
-    siglas = "|".join(sorted(EMPRESAS, key=len, reverse=True)) or "[A-Z][A-Z0-9]{1,5}"
-    return re.compile(r"\b(" + siglas + r")-([A-Z0-9]{2,6})-([A-Z0-9]{2,6})-(\d{3}|XXX)(?:/(\d{4}))?\s+·\s+(?:v|[Vv]ersão\s+)([0-9][0-9.]*(?:-r\d+)?)")
+def _preenchido(v):
+    """Campo do cadastro: vazio ou [definir] vale como não informado."""
+    return None if v is None or str(v).strip() in ("", INDEFINIDO) else str(v).strip()
 
 
 def carregar_marca(caminho):
-    """Lê o marca.json (empresas, logos, áreas, tipos extras e política) e devolve os ativos: os logos."""
-    global EMPRESAS_ATIVAS, EMPRESAS_DO_GRUPO, EMPRESA_PADRAO, RE_CODIGO
-    base = os.path.dirname(os.path.abspath(caminho))
+    """Lê o marca.json, preenche o cadastro (empresas, áreas, tipos, organização) e devolve os ativos (logos)."""
     try:
         with open(caminho, encoding="utf8") as f:
             cfg = json.load(f)
     except (OSError, ValueError) as e:
         raise SystemExit(f"Não consegui ler o marca.json ({caminho}): {e}")
-    lista = cfg.get("empresas") or []
-    if not lista:
+    base = os.path.dirname(os.path.abspath(caminho))
+    emps = cfg.get("empresas") or []
+    if not emps:
         raise SystemExit("marca.json: a lista 'empresas' está vazia.")
     EMPRESAS.clear()
     logos = {}
-    for e in lista:
+    for e in emps:
         sig = str(e.get("sigla", "")).upper()
-        if not re.fullmatch(r"[A-Z][A-Z0-9]{1,5}", sig):
-            raise SystemExit(f"marca.json: sigla inválida {sig!r} (2 a 6 letras ou números, começando por letra).")
+        if not re.fullmatch(r"[A-Z0-9]{2,6}", sig):
+            raise SystemExit(f"marca.json: sigla inválida {sig!r} (2 a 6 letras ou números).")
         if sig in EMPRESAS:
-            raise SystemExit(f"marca.json: a sigla {sig} aparece duas vezes.")
+            raise SystemExit(f"marca.json: sigla {sig} repetida.")
         cor = str(e.get("cor") or "1F3864").lstrip("#").upper()
         if not re.fullmatch(r"[0-9A-F]{6}", cor):
             raise SystemExit(f"marca.json: cor inválida em {sig} (use hexadecimal, ex.: 1F3864).")
-        emp = {"marca": e.get("marca") or sig, "cor": cor, "doc_rotulo": e.get("documento_rotulo") or "CNPJ",
-               "razao": None if _vazio(e.get("razao_social")) else e["razao_social"],
-               "documento": None if _vazio(e.get("documento")) else e["documento"],
-               "cidade": None if _vazio(e.get("cidade")) else e["cidade"]}
-        for k in ("grupo", "aposentada"):
-            if e.get(k): emp[k] = True
+        grupo = bool(e.get("grupo"))
+        marca = _preenchido(e.get("marca")) or sig
         if e.get("logo"):
             try:
                 logos[sig] = ler_imagem(e["logo"], base)
             except (OSError, ValueError) as ex:
                 raise SystemExit(f"marca.json: logo de {sig} ilegível ({ex}).")
-        else:
-            emp["sem_logo"] = True
-        EMPRESAS[sig] = emp
-    EMPRESAS_ATIVAS = [k for k in EMPRESAS if not EMPRESAS[k].get("aposentada")]
+        EMPRESAS[sig] = {"marca": marca, "razao": _preenchido(e.get("razao_social")) or (marca if grupo else None),
+                         "documento": _preenchido(e.get("documento")),
+                         "documento_rotulo": _preenchido(e.get("documento_rotulo")) or "CNPJ",
+                         "cidade": _preenchido(e.get("cidade")), "cor": cor, "grupo": grupo,
+                         "ativa": e.get("ativa", True) is not False, "sem_logo": sig not in logos}
+    EMPRESAS_ATIVAS[:] = [k for k, d in EMPRESAS.items() if d["ativa"]]
+    EMPRESAS_DO_GRUPO[:] = [k for k in EMPRESAS_ATIVAS if not EMPRESAS[k]["grupo"]]
     if not EMPRESAS_ATIVAS:
-        raise SystemExit("marca.json: todas as empresas estão aposentadas.")
-    EMPRESAS_DO_GRUPO = [k for k in EMPRESAS_ATIVAS if not EMPRESAS[k].get("grupo")]
-    EMPRESA_PADRAO = str(cfg.get("empresa_padrao") or EMPRESAS_ATIVAS[0]).upper()
-    if EMPRESA_PADRAO not in EMPRESAS_ATIVAS:
-        raise SystemExit(f"marca.json: empresa_padrao {EMPRESA_PADRAO} não está entre as empresas ativas.")
+        raise SystemExit("marca.json: nenhuma empresa ativa.")
+
     if cfg.get("areas"):
-        AREAS.clear(); AREAS.update({k.upper(): v for k, v in cfg["areas"].items()})
-    AREAS.update({k.upper(): v for k, v in (cfg.get("areas_extra") or {}).items()})
+        AREAS.clear()
+        AREAS.update({str(k).upper(): v for k, v in cfg["areas"].items()})
+    AREAS.update({str(k).upper(): v for k, v in (cfg.get("areas_extra") or {}).items()})
     for sig, d in (cfg.get("tipos_extra") or {}).items():
+        sig = str(sig).upper()
         if not isinstance(d, dict) or d.get("variante") not in ("curto", "longo"):
-            raise SystemExit(f"marca.json: o tipo extra {sig} precisa de variante 'curto' ou 'longo'.")
-        (TIPOS_LONGOS if d["variante"] == "longo" else TIPOS_CURTOS)[sig.upper()] = d.get("nome") or sig.upper()
-    MARCA.update(organizacao=cfg.get("organizacao") or "", politica=cfg.get("politica") or {},
-                 tipos_ativos=[t.upper() for t in cfg.get("tipos_ativos") or []],
-                 areas_ativas=[a.upper() for a in cfg.get("areas_ativas") or []])
-    RE_CODIGO = re_codigo()
-    definir_empresa(EMPRESA_PADRAO)
-    return {"logos": logos}
+            raise SystemExit(f"marca.json: o tipo extra {sig} precisa de \"nome\" e \"variante\" ('curto' ou 'longo').")
+        (TIPOS_CURTOS if d["variante"] == "curto" else TIPOS_LONGOS)[sig] = d.get("nome") or sig
+    tipos = {**TIPOS_CURTOS, **TIPOS_LONGOS}
+    for chave, todos in (("areas_ativas", AREAS), ("tipos_ativos", tipos)):
+        lista = [str(x).upper() for x in (cfg.get(chave) or todos)]
+        fora = [x for x in lista if x not in todos]
+        if fora:
+            raise SystemExit(f"marca.json: {chave} cita {', '.join(fora)}, que não existe(m).")
+        ORG[chave] = lista
+    padrao = str(cfg.get("empresa_padrao") or EMPRESAS_ATIVAS[0]).upper()
+    if padrao not in EMPRESAS:
+        raise SystemExit(f"marca.json: empresa_padrao {padrao} não está em 'empresas'.")
+    ORG.update(organizacao=_preenchido(cfg.get("organizacao")) or "",
+               politica=_preenchido((cfg.get("politica") or {}).get("codigo")) or "", padrao=padrao)
+    definir_empresa(padrao)
+    return {"logos": logos, "fontes": carregar_visual(cfg.get("visual"), base)}
+
+
+def carregar_visual(v, base):
+    """Lê o "visual" do marca.json; devolve as fontes a embutir: [(família, estilo, bytes)]."""
+    VISUAL.clear()
+    if not v:
+        return []
+    if not isinstance(v, dict):
+        raise SystemExit("marca.json: 'visual' precisa ser um objeto.")
+    for k in ("cor_texto", "cor_titulo", "cor_secundaria", "cor_realce", "cor_papel", "cor_cartao", "cor_linha"):
+        if v.get(k):
+            c = str(v[k]).lstrip("#").upper()
+            if not re.fullmatch(r"[0-9A-F]{6}", c):
+                raise SystemExit(f"marca.json: visual.{k} inválida (use hexadecimal, ex.: 1F3864).")
+            VISUAL[k] = c
+    for k in ("fonte_texto", "fonte_titulo"):
+        if _preenchido(v.get(k)):
+            if not re.fullmatch(r"[A-Za-z0-9 \-]{1,40}", str(v[k]).strip()):
+                raise SystemExit(f"marca.json: visual.{k} tem caracteres que o Word não aceita num nome de fonte.")
+            VISUAL[k] = str(v[k]).strip()
+    fontes = []
+    for f in v.get("fontes") or []:
+        fam, est = str(f.get("familia", "")).strip(), f.get("estilo")
+        if fam not in (VISUAL.get("fonte_texto"), VISUAL.get("fonte_titulo")):
+            raise SystemExit(f"marca.json: a fonte '{fam}' não é a fonte_texto nem a fonte_titulo do visual.")
+        if est not in ESTILOS_FONTE:
+            raise SystemExit(f"marca.json: estilo de fonte '{est}' inválido (use {', '.join(ESTILOS_FONTE)}).")
+        if any(x[0] == fam and x[1] == est for x in fontes):
+            raise SystemExit(f"marca.json: fonte {fam} {est} repetida.")
+        try:
+            fontes.append((fam, est, ler_fonte(f.get("arquivo", ""), base)))
+        except (OSError, ValueError) as ex:
+            raise SystemExit(f"marca.json: fonte {fam} {est} ilegível ({ex}).")
+    return fontes
+
+
+def cadastro_completo(d):
+    return d["grupo"] or bool(d["razao"] and d["documento"])
 
 
 def resumo_marca():
-    linhas = [f"Marca: {MARCA['organizacao'] or '(sem nome de organização)'}"]
-    for k, e in EMPRESAS.items():
-        if e.get("grupo"):
-            st = "documento do grupo (rodapé com os logos de todas as empresas ativas)"
+    linhas = [f"Marca: {ORG['organizacao'] or '(sem nome de organização)'}"
+              + (f"  ·  política {ORG['politica']}" if ORG["politica"] else "")]
+    for k, d in EMPRESAS.items():
+        logo = "logo ok" if not d["sem_logo"] else "SEM LOGO (rodapé só com o filete)"
+        if d["grupo"]:
+            st = "documento do grupo (sem documento; rodapé com as logos das empresas ativas)"
+        elif cadastro_completo(d):
+            st = "pode emitir OFICIAL"
         else:
-            st = "pode emitir OFICIAL" if e["razao"] and e["documento"] else "só minuta e em aprovação (faltam razão social/documento)"
-        logo = "SEM LOGO (rodapé só com o filete)" if e.get("sem_logo") else "logo ok"
-        linhas.append(f"  {k}: {e['marca']} · #{e['cor']} · {logo} · {st}" + (" · APOSENTADA" if e.get("aposentada") else ""))
-    tipos = MARCA["tipos_ativos"] or list(TIPOS_CURTOS) + list(TIPOS_LONGOS)
-    areas = MARCA["areas_ativas"] or list(AREAS)
-    linhas.append(f"  padrão: {EMPRESA_PADRAO} · áreas: {', '.join(areas)} · tipos: {', '.join(tipos)}")
-    if MARCA["politica"].get("codigo"):
-        linhas.append(f"  norma: {MARCA['politica']['codigo']} – {MARCA['politica'].get('titulo', '')}")
+            st = f"só minuta ou em aprovação (falta razão social/{d['documento_rotulo']})"
+        linhas.append(f"  {k}: {d['marca']} · #{d['cor']} · {logo} · {st}" + ("" if d["ativa"] else " · APOSENTADA"))
+    if VISUAL:
+        linhas.append(f"  visual: texto {VISUAL.get('fonte_texto', 'Arial')} · títulos {VISUAL.get('fonte_titulo', 'Arial')}"
+                      + (f" · títulos #{VISUAL['cor_titulo']}" if VISUAL.get("cor_titulo") else ""))
+    linhas.append(f"  padrão: {ORG['padrao']} · {len(ORG['areas_ativas'])} de {len(AREAS)} áreas ativas · "
+                  f"{len(ORG['tipos_ativos'])} de {len(TIPOS_CURTOS) + len(TIPOS_LONGOS)} tipos ativos")
     return "\n".join(linhas)
 
 
-def marca_portatil(caminho):
-    """marca.json com os logos embutidos (data URI): um arquivo só, sem depender da pasta."""
+def embutir_logos(caminho, saida):
+    """Cópia do marca.json com os logos (e as fontes do visual) em data URI: um arquivo só, que também serve para a página."""
     with open(caminho, encoding="utf8") as f:
         cfg = json.load(f)
     base = os.path.dirname(os.path.abspath(caminho))
@@ -228,49 +302,13 @@ def marca_portatil(caminho):
         if ref and not str(ref).startswith("data:"):
             dados = ler_imagem(ref, base)
             e["logo"] = f"data:image/{dim_imagem(dados)[2]};base64," + base64.b64encode(dados).decode()
-    return cfg
-
-
-PAGINA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "timbrador.html")
-
-
-def montar_pagina(caminho_marca, saida):
-    """Cópia da página com a marca embutida: quem abre não precisa carregar o marca.json."""
-    cfg = marca_portatil(caminho_marca)
-    html = open(PAGINA, encoding="utf8").read()
-    js = json.dumps(cfg, ensure_ascii=False).replace("</", "<\\/")
-    novo, n = re.subn(r'(<script type="application/json" id="marca-embutida">).*?(</script>)',
-                      lambda m: m.group(1) + js + m.group(2), html, count=1, flags=re.S)
-    if not n:
-        raise SystemExit("A página não tem o bloco marca-embutida.")
+    for f in (cfg.get("visual") or {}).get("fontes") or []:
+        ref = f.get("arquivo")
+        if ref and not str(ref).startswith("data:"):
+            f["arquivo"] = "data:font/ttf;base64," + base64.b64encode(ler_fonte(ref, base)).decode()
     with open(saida, "w", encoding="utf8") as f:
-        f.write(novo)
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
     return saida
-
-
-def comando_soffice():
-    cmd = os.environ.get("TIMBRADOR_SOFFICE")
-    if cmd:
-        return shlex.split(cmd)
-    for nome in ("soffice", "libreoffice"):
-        if shutil.which(nome):
-            return [nome]
-    return None
-
-
-def para_pdf(docx, pasta):
-    """Converte com o LibreOffice (perfil temporário, para não esbarrar numa instância aberta). None sem LibreOffice."""
-    cmd = comando_soffice()
-    if not cmd:
-        return None
-    with tempfile.TemporaryDirectory(prefix="timbrador_lo_") as perfil:
-        try:
-            subprocess.run(cmd + [f"-env:UserInstallation=file://{perfil}", "--headless", "--convert-to", "pdf",
-                                  "--outdir", pasta, docx], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=240)
-        except (OSError, subprocess.TimeoutExpired):
-            return None
-    pdf = os.path.join(pasta, os.path.splitext(os.path.basename(docx))[0] + ".pdf")
-    return pdf if os.path.exists(pdf) else None
 
 # ----------------------------------------------------------------------------- utilitários XML
 class Ctx:
@@ -441,7 +479,7 @@ def marca_dagua_vml(ctx, texto, cor):
             f'style="position:absolute;margin-left:0;margin-top:0;width:{w:.1f}pt;height:{h:.1f}pt;rotation:315;z-index:-251654144;'
             f'mso-position-horizontal:center;mso-position-horizontal-relative:page;mso-position-vertical:center;mso-position-vertical-relative:page" '
             f'o:allowincell="f" fillcolor="#{cor}" stroked="f"><v:fill opacity="1"/>'
-            f'<v:textpath style="font-family:&quot;Arial&quot;;font-size:1pt;font-weight:bold" string="{escape(texto)}"/>'
+            f'<v:textpath style="font-family:&quot;{VISUAL.get("fonte_titulo", "Arial")}&quot;;font-size:1pt;font-weight:bold" string="{escape(texto)}"/>'
             f'<w10:wrap anchorx="page" anchory="page"/></v:shape></w:pict></w:r>')
 
 
@@ -533,18 +571,18 @@ def linhas_controle(ctx, spec):
     texto = est["rodape"]
     if spec["estado"] == "OFICIAL" and spec.get("aprovado_por"):
         texto = f'Aprovado por {spec["aprovado_por"]} em {spec.get("data_aprovacao", "")}. ' + texto
-    linha1 = par(marca(ctx, spec) + run(codigo_versao(spec) + "  ·  ", sz=8, cor="404040") + pagina_x_de_y(sz=8, cor="000000", b=True),
+    linha1 = par(marca(ctx, spec) + run(codigo_versao(spec) + "  ·  ", sz=8, cor=sec("404040")) + pagina_x_de_y(sz=8, cor=cor_texto(), b=True),
                  jc="center", antes=80, depois=0, linha=240, estilo="Rodape")
-    linha2 = par(run(texto, sz=7.5, cor=est["cor"] if spec["estado"] != "OFICIAL" else "404040", b=spec["estado"] != "OFICIAL"),
+    linha2 = par(run(texto, sz=7.5, cor=est["cor"] if spec["estado"] != "OFICIAL" else sec("404040"), b=spec["estado"] != "OFICIAL"),
                  jc="center", antes=0, depois=0, linha=240, estilo="Rodape")
-    linha3 = par(run(identificacao_empresa(), sz=7.5, cor="7F7F7F"),
+    linha3 = par(run(identificacao_empresa(), sz=7.5, cor=sec("7F7F7F")),
                  jc="center", antes=0, depois=0, linha=240, estilo="Rodape",
                  borda='<w:bottom w:val="single" w:sz="4" w:space="4" w:color="BFBFBF"/>')
     return linha1 + linha2 + linha3
 
 
 def rodape_reduzido(ctx, parte, ativos, spec, largura_tw):
-    """Rodapé das páginas internas do documento longo: filete na cor da empresa, logo à esquerda e título à direita."""
+    """Rodapé das páginas internas do documento longo: filete laranja, logo à esquerda e título à direita."""
     if EMPRESA.get("grupo"):
         logo = logos_do_grupo(ctx, parte, ativos, 0.6)
         c1 = int(largura_tw * 0.6)
@@ -559,7 +597,7 @@ def rodape_reduzido(ctx, parte, ativos, spec, largura_tw):
             f'<w:tblCellMar><w:top w:w="100" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr>'
             f'<w:tblGrid><w:gridCol w:w="{c1}"/><w:gridCol w:w="{c2}"/></w:tblGrid><w:tr>'
             f'{cel(c1, par(logo, antes=0, depois=0, linha=240, estilo="Rodape"))}'
-            f'{cel(c2, par(run(titulo, sz=8, cor="404040"), jc="right", antes=0, depois=0, linha=240, estilo="Rodape"))}</w:tr></w:tbl>'
+            f'{cel(c2, par(run(titulo, sz=8, cor=sec("404040")), jc="right", antes=0, depois=0, linha=240, estilo="Rodape"))}</w:tr></w:tbl>'
             + par("", antes=0, depois=0, linha=120, estilo="Rodape"))
 
 # ----------------------------------------------------------------------------- blocos de conteúdo
@@ -637,7 +675,7 @@ def bloco_tabela(ctx, b, largura_tw, legenda=True):
             tcpr = f'<w:tcW w:w="{ws[k]}" w:type="dxa"/>'
             if cabecalho:
                 tcpr += '<w:tcBorders><w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/></w:tcBorders>'
-                tcpr += '<w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/>'
+                tcpr += f'<w:shd w:val="clear" w:color="auto" w:fill="{realce()}"/>'
             tr += (f"<w:tc><w:tcPr>{tcpr}<w:vAlign w:val=\"center\"/></w:tcPr>" +
                    par(inline(v, b=cabecalho), estilo="TabelaTexto", jc="center" if cabecalho else alinh[k]) + "</w:tc>")
         return tr + "</w:tr>"
@@ -678,7 +716,7 @@ def bloco_campos(itens, largura_tw, rotulo_cm=4.0):
            f'<w:tblCellMar><w:top w:w="30" w:type="dxa"/><w:left w:w="60" w:type="dxa"/><w:bottom w:w="30" w:type="dxa"/><w:right w:w="60" w:type="dxa"/></w:tblCellMar></w:tblPr>'
            f'<w:tblGrid><w:gridCol w:w="{c1}"/><w:gridCol w:w="{c2}"/></w:tblGrid>')
     for rot, val in itens:
-        tbl += (f'<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="{c1}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr>'
+        tbl += (f'<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="{c1}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="{realce()}"/></w:tcPr>'
                 f'{par(run(rot, b=True, sz=10), estilo="TabelaTexto")}</w:tc>'
                 f'<w:tc><w:tcPr><w:tcW w:w="{c2}" w:type="dxa"/></w:tcPr>{par(inline(val, sz=10), estilo="TabelaTexto")}</w:tc></w:tr>')
     return tbl + "</w:tbl>" + par("", antes=0, depois=0, linha=240, estilo="TabelaTexto")
@@ -717,7 +755,7 @@ def bloco_assinaturas_tabela(ass, largura_tw):
     borda = "<w:tblBorders>" + "".join(f'<w:{l} w:val="single" w:sz="4" w:space="0" w:color="000000"/>'
                                        for l in ("top", "left", "bottom", "right", "insideH", "insideV")) + "</w:tblBorders>"
     def cel(w, c, cab=False):
-        sombra = '<w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/>' if cab else ""
+        sombra = f'<w:shd w:val="clear" w:color="auto" w:fill="{realce()}"/>' if cab else ""
         return f'<w:tc><w:tcPr><w:tcW w:w="{w}" w:type="dxa"/>{sombra}<w:vAlign w:val="center"/></w:tcPr>{c}</w:tc>'
     t = (f'<w:tbl><w:tblPr><w:tblW w:w="{largura_tw}" w:type="dxa"/>{borda}<w:tblLayout w:type="fixed"/>'
          f'<w:tblCellMar><w:left w:w="85" w:type="dxa"/><w:right w:w="85" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>{grade(ws)}</w:tblGrid>'
@@ -750,175 +788,30 @@ def montar_assinaturas(spec, formato=None):
     spec["corpo"] = corpo
 
 
-# Regra do padrão: assinatura entra só pelo Timbrador (a página), na caixa "Com assinatura". Este gerador não põe
-# assinatura em documento nenhum: tira do corpo as linhas ou a tabela de assinaturas (e o local e data que as antecede)
-# e guarda os envolvidos como "assinaturas_previstas" na ficha. Ao abrir o arquivo na página, eles já vêm preenchidos,
-# com a caixa desmarcada: quem timbra decide. A cópia OBSOLETO de uma versão já assinada fica como estava.
-def adiar_assinaturas(spec):
-    corpo = spec.get("corpo") or []
-    previstas = [dict(a) for a in spec.get("assinaturas_previstas") or []] + [dict(a) for a in spec.get("envolvidos") or []]
-    fora, tinha = [], False
-    for b in corpo:
-        if isinstance(b, dict) and b.get("t") == "assinaturas":
-            tinha = True
-            previstas += [{"nome": a.get("nome", ""), "cargo": a.get("cargo", ""), "papel": a.get("papel") or a.get("documento", "")} for a in b.get("itens", [])]
-        elif isinstance(b, dict) and _eh_tabela_assinaturas(b):
-            tinha = True
-            previstas += [{"nome": (l + ["", "", ""])[0], "cargo": (l + ["", "", ""])[1], "papel": (l + ["", "", ""])[2]} for l in b.get("linhas", [])]
-        else:
-            fora.append(b)
-    if tinha:
-        while fora and isinstance(fora[-1], dict) and (fora[-1].get("t") == "local_data" or
-                                                       (fora[-1].get("t") == "p" and re.fullmatch(r"\**Assinaturas\**", fora[-1].get("texto", "")))):
-            fora.pop()
-    pedia = bool(spec.get("com_assinatura"))
-    for k in ("com_assinatura", "envolvidos", "assinatura_formato"):
-        spec.pop(k, None)
-    spec["corpo"] = fora
-    vistos, unicas = set(), []
-    for a in previstas:
-        chave = str(a.get("nome", "")).strip().lower()
-        if chave and chave not in vistos:
-            vistos.add(chave); unicas.append({k: a.get(k, "") for k in ("nome", "cargo", "papel")})
-    if unicas: spec["assinaturas_previstas"] = unicas
-    else: spec.pop("assinaturas_previstas", None)
-    if tinha or pedia:
-        return ("Assinaturas não entram pelo gerador: elas são colocadas no Timbrador (página), na caixa \"Com assinatura\". "
-                + (f"Os envolvidos ({', '.join(a['nome'] for a in unicas)}) ficaram registrados como previstos e já vêm preenchidos ao abrir o arquivo na página."
-                   if unicas else ""))
+def comando_soffice():
+    """LibreOffice: o comando de TIMBRADOR_SOFFICE (para sandbox que precisa de wrapper), soffice ou libreoffice."""
+    cmd = os.environ.get("TIMBRADOR_SOFFICE")
+    if cmd:
+        return shlex.split(cmd)
+    for nome in ("soffice", "libreoffice"):
+        if shutil.which(nome):
+            return [nome]
     return None
 
 
-# Anexos externos: arquivos que acompanham o documento (conversas exportadas em XML, planilhas, fotos…). Ficam numa
-# pasta com o código do documento, ao lado do .docx, com o nome "Anexo 01 – nome original"; o documento os lista numa
-# seção "Anexos", antes do local e data, com tamanho e SHA-256. Mesma regra da página.
-CAB_ANEXOS = ["Nº", "Arquivo", "Tamanho"]
-TEXTO_ANEXOS = ("Os arquivos abaixo acompanham este documento e ficam na mesma pasta. A impressão digital SHA-256 "
-                "permite conferir que o arquivo não foi alterado.")
-
-
-def tamanho_txt(n):
-    n = int(n or 0)
-    if n < 1024: return f"{n} B"
-    return f"{n / 1024:.1f} KB".replace(".", ",") if n < 1048576 else f"{n / 1048576:.1f} MB".replace(".", ",")
-
-
-def nome_anexo(i, original, versao=None):
-    return f"Anexo {i:02d}{f' (v{versao})' if versao else ''} – {original}"
-
-
-def nome_pasta_doc(spec):
-    """Pasta do documento com anexos: o código; minuta (XXX) leva também o título."""
-    cod = str(spec.get("codigo") or "").replace("/", "-")
-    if "XXX" not in cod: return cod
-    t = re.sub(r"\s+", " ", re.sub(r'[\\/:*?"<>|()]+', " ", str(spec.get("titulo") or ""))).strip()[:60].strip()
-    return f"{cod} – {t}" if t else cod
-
-
-def bloco_anexos(itens, largura_tw):
-    if not itens: return ""
-    w1, w3 = int(1.2 * TW_CM), int(2.3 * TW_CM)
-    ws = [w1, largura_tw - w1 - w3, w3]
-    borda = "<w:tblBorders>" + "".join(f'<w:{l} w:val="single" w:sz="4" w:space="0" w:color="000000"/>'
-                                       for l in ("top", "left", "bottom", "right", "insideH", "insideV")) + "</w:tblBorders>"
-    def cel(w, c, cab=False):
-        sombra = '<w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/>' if cab else ""
-        return f'<w:tc><w:tcPr><w:tcW w:w="{w}" w:type="dxa"/>{sombra}<w:vAlign w:val="center"/></w:tcPr>{c}</w:tc>'
-    t = (f'<w:tbl><w:tblPr><w:tblW w:w="{largura_tw}" w:type="dxa"/>{borda}<w:tblLayout w:type="fixed"/>'
-         f'<w:tblCellMar><w:left w:w="85" w:type="dxa"/><w:right w:w="85" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>{grade(ws)}</w:tblGrid>'
-         '<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>' +
-         "".join(cel(ws[i], par(run(c, b=True, sz=10), jc="center", estilo="TabelaTexto"), True) for i, c in enumerate(CAB_ANEXOS)) + "</w:tr>")
-    for i, a in enumerate(itens):
-        arq = (par(run(a.get("nome") or a.get("original", ""), sz=10), estilo="TabelaTexto", antes=0, depois=0) +
-               par(run(f'SHA-256: {a.get("sha256", "")}', sz=7, fonte="Courier New"), estilo="TabelaTexto", antes=0, depois=0))
-        t += ('<w:tr><w:trPr><w:cantSplit/></w:trPr>' + cel(ws[0], par(run(str(i + 1), sz=10), jc="center", estilo="TabelaTexto")) +
-              cel(ws[1], arq) + cel(ws[2], par(run(tamanho_txt(a.get("tamanho")), sz=10), jc="right", estilo="TabelaTexto")) + "</w:tr>")
-    return (par(run("Anexos", b=True), estilo="SemRecuo", keep=True, antes=240) + par(run(TEXTO_ANEXOS, sz=10), estilo="SemRecuo", keep=True)
-            + t + "</w:tbl>" + par("", antes=0, depois=0, linha=240))
-
-
-def _eh_tabela_anexos(b):
-    return isinstance(b, dict) and b.get("t") == "tabela" and [str(c).replace("*", "").strip() for c in (b.get("cabecalho") or [])] == CAB_ANEXOS
-
-
-def extrair_anexos(corpo):
-    """Tira do corpo a seção Anexos (título, texto e tabela): a lista vem da ficha."""
-    fora = []
-    for b in corpo or []:
-        if isinstance(b, dict) and (b.get("t") == "anexos_externos" or _eh_tabela_anexos(b)):
-            while fora and isinstance(fora[-1], dict) and fora[-1].get("t") == "p" and \
-                    str(fora[-1].get("texto", "")).replace("*", "").strip() in ("Anexos", TEXTO_ANEXOS):
-                fora.pop()
-            continue
-        fora.append(b)
-    return fora
-
-
-def montar_anexos(spec):
-    """Seção Anexos no fim do conteúdo, antes do local e data e das assinaturas."""
-    corpo = extrair_anexos(spec.get("corpo"))
-    itens = [a for a in spec.get("anexos_externos") or [] if isinstance(a, dict)]
-    if spec.get("com_anexos") and itens:
-        k = len(corpo)
-        while k and isinstance(corpo[k - 1], dict) and (corpo[k - 1].get("t") in ("assinaturas", "local_data") or _eh_tabela_assinaturas(corpo[k - 1])
-                                                        or (corpo[k - 1].get("t") == "p" and re.fullmatch(r"\**Assinaturas\**", corpo[k - 1].get("texto", "")))):
-            k -= 1
-        corpo = corpo[:k] + [{"t": "anexos_externos", "itens": itens}] + corpo[k:]
-    spec["corpo"] = corpo
-
-
-def sha256_arquivo(caminho):
-    h = hashlib.sha256()
-    with open(caminho, "rb") as f:
-        for bloco in iter(lambda: f.read(1 << 20), b""):
-            h.update(bloco)
-    return h.hexdigest()
-
-
-def _confere(caminho, a):
-    return os.path.isfile(caminho) and os.path.getsize(caminho) == int(a.get("tamanho") or -1) and sha256_arquivo(caminho) == a.get("sha256")
-
-
-def preparar_anexos(spec, arquivos, pasta_doc):
-    """Grava os anexos na pasta do documento e põe a lista na especificação. Os já registrados na ficha precisam
-    estar na pasta (ou na pasta do arquivo lido pelo --atualizar) com o mesmo SHA-256. Nome ocupado por outro conteúdo
-    não é sobrescrito: o anexo novo leva a versão no nome, e a versão anterior continua íntegra."""
-    os.makedirs(pasta_doc, exist_ok=True)
-    origem = spec.pop("anexos_origem", None)
-    versao = str(spec.get("versao", "")).split("-r")[0]
-    itens, avisos, usados = [], [], set()
-    for a in [x for x in spec.get("anexos_externos") or [] if isinstance(x, dict)]:
-        nome = a.get("nome") or ""
-        if not _confere(os.path.join(pasta_doc, nome), a):
-            if origem and _confere(os.path.join(origem, nome), a):
-                shutil.copy2(os.path.join(origem, nome), os.path.join(pasta_doc, nome))
-            else:
-                raise SystemExit(f'Anexo "{nome}", registrado no documento, não está em {pasta_doc}'
-                                 + (f" nem em {origem}" if origem else "") + " com o mesmo conteúdo (SHA-256): passe o arquivo com --anexo, ou retire-o da lista \"anexos_externos\".")
-        itens.append({k: a.get(k) for k in ("nome", "original", "tamanho", "sha256")}); usados.add(nome)
-    for caminho in arquivos:
-        if not os.path.isfile(caminho):
-            raise SystemExit(f"Anexo não encontrado: {caminho}")
-        original, tamanho, sha = os.path.basename(caminho), os.path.getsize(caminho), sha256_arquivo(caminho)
-        if any(x["sha256"] == sha for x in itens):
-            avisos.append(f"{original}: arquivo repetido, entrou uma vez só."); continue
-        i, k = len(itens) + 1, 1
-        nome = nome_anexo(i, original)
-        while True:
-            destino = os.path.join(pasta_doc, nome)
-            if not os.path.exists(destino) and nome not in usados:
-                shutil.copy2(caminho, destino); break
-            if os.path.exists(destino) and nome not in usados and sha256_arquivo(destino) == sha:
-                break
-            k += 1
-            nome = nome_anexo(i, original, versao + (f"-{k - 1}" if k > 2 else ""))
-        usados.add(nome)
-        itens.append({"nome": nome, "original": original, "tamanho": tamanho, "sha256": sha})
-    if not itens:
-        raise SystemExit("Com anexos externos: informe ao menos um arquivo (--anexo).")
-    spec["anexos_externos"], spec["com_anexos"] = itens, True
-    avisos.append(f"Documento e {len(itens)} anexo(s) na pasta {pasta_doc}.")
-    return avisos
+def para_pdf(docx, pasta):
+    """Converte com LibreOffice num perfil temporário (não disputa o perfil de quem está usando o programa)."""
+    cmd = comando_soffice()
+    if not cmd:
+        return None
+    with tempfile.TemporaryDirectory(prefix="timbrador_lo_") as perfil:
+        try:
+            subprocess.run(cmd + [f"-env:UserInstallation=file://{perfil}", "--headless", "--convert-to", "pdf",
+                                  "--outdir", pasta, docx], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=240)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+    pdf = os.path.join(pasta, os.path.splitext(os.path.basename(docx))[0] + ".pdf")
+    return pdf if os.path.exists(pdf) else None
 
 
 def assinaturas_sozinhas(docx, spec):
@@ -994,11 +887,9 @@ def blocos(ctx, lista, parte, largura_tw, longo):
         elif t == "figura":
             out += bloco_figura(ctx, b, parte, largura_tw)
         elif t == "campos":
-            out += bloco_campos(b["itens"], largura_tw, b.get("rotulo_cm") or 3.3)
+            out += bloco_campos(b["itens"], largura_tw, b.get("rotulo_cm", 4.0))
         elif t == "assinaturas":
             out += bloco_assinaturas_tabela(b["itens"], largura_tw) if b.get("formato") == "tabela" else bloco_assinaturas(b["itens"], largura_tw)
-        elif t == "anexos_externos":
-            out += bloco_anexos(b["itens"], largura_tw)
         elif t == "local_data":
             dt = b.get("data") or datetime.date.today().strftime("%d/%m/%Y")   # sem data informada, usa a de hoje
             out += par(run(f'{b.get("local", dado("cidade"))}, {data_extenso(dt)}.'), estilo="SemRecuo", jc="right", antes=240, keep=True)
@@ -1018,25 +909,29 @@ def estilos_xml():
         n = f'<w:next w:val="{prox}"/>' if prox else ""
         return (f'<w:style w:type="{tipo}" w:styleId="{id_}"><w:name w:val="{nome}"/>{b}{n}{extra}<w:qFormat/>'
                 f"<w:pPr>{ppr}</w:pPr><w:rPr>{rpr_}</w:rPr></w:style>")
-    f = '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Arial" w:cs="Arial"/>'
+    fonte = lambda n: f'<w:rFonts w:ascii="{n}" w:hAnsi="{n}" w:eastAsia="{n}" w:cs="{n}"/>'
+    f = fonte(VISUAL.get("fonte_texto", "Arial"))
+    # títulos: fonte e cor próprias só quando o visual as define (sem visual, nada muda)
+    tf = fonte(VISUAL["fonte_titulo"]) if VISUAL.get("fonte_titulo") else ""
+    tc = f'<w:color w:val="{VISUAL["cor_titulo"]}"/>' if VISUAL.get("cor_titulo") else ""
     s = (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles {NS}>'
          f'<w:docDefaults><w:rPrDefault><w:rPr>{f}<w:sz w:val="24"/><w:szCs w:val="24"/><w:lang w:val="pt-BR" w:eastAsia="pt-BR" w:bidi="ar-SA"/></w:rPr></w:rPrDefault>'
          f'<w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="360" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>')
     s += ('<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/>'
           '<w:pPr><w:widowControl/><w:spacing w:after="120" w:line="360" w:lineRule="auto"/><w:ind w:firstLine="709"/><w:jc w:val="both"/></w:pPr>'
-          '<w:rPr><w:color w:val="000000"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:style>')
+          f'<w:rPr><w:color w:val="{cor_texto()}"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:style>')
     s += est("SemRecuo", "Texto sem recuo", '<w:ind w:firstLine="0"/>')
     tit = '<w:keepNext/><w:keepLines/><w:spacing w:before="360" w:after="240" w:line="360" w:lineRule="auto"/><w:ind w:left="0" w:firstLine="0"/><w:jc w:val="left"/>'
-    s += est("Heading1", "heading 1", tit + '<w:outlineLvl w:val="0"/>', "<w:b/><w:bCs/><w:caps/>", prox="Normal")
-    s += est("Heading2", "heading 2", tit + '<w:outlineLvl w:val="1"/>', "<w:caps/>", prox="Normal")
-    s += est("Heading3", "heading 3", tit + '<w:outlineLvl w:val="2"/>', "<w:b/><w:bCs/>", prox="Normal")
-    s += est("Heading4", "heading 4", tit + '<w:outlineLvl w:val="3"/>', "<w:b/><w:i/>", prox="Normal")
-    s += est("Heading5", "heading 5", tit + '<w:outlineLvl w:val="4"/>', "<w:i/>", prox="Normal")
+    s += est("Heading1", "heading 1", tit + '<w:outlineLvl w:val="0"/>', tf + "<w:b/><w:bCs/><w:caps/>" + tc, prox="Normal")
+    s += est("Heading2", "heading 2", tit + '<w:outlineLvl w:val="1"/>', tf + "<w:caps/>" + tc, prox="Normal")
+    s += est("Heading3", "heading 3", tit + '<w:outlineLvl w:val="2"/>', tf + "<w:b/><w:bCs/>" + tc, prox="Normal")
+    s += est("Heading4", "heading 4", tit + '<w:outlineLvl w:val="3"/>', tf + "<w:b/><w:i/>" + tc, prox="Normal")
+    s += est("Heading5", "heading 5", tit + '<w:outlineLvl w:val="4"/>', tf + "<w:i/>" + tc, prox="Normal")
     centro = '<w:keepNext/><w:spacing w:before="0" w:after="360" w:line="360" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/>'
-    s += est("TituloSemNumero", "Título sem indicativo numérico", centro + '<w:outlineLvl w:val="0"/>', "<w:b/><w:bCs/><w:caps/>", prox="Normal")
-    s += est("TituloSumario", "Título do sumário", centro, "<w:b/><w:bCs/><w:caps/>", prox="Normal")
+    s += est("TituloSemNumero", "Título sem indicativo numérico", centro + '<w:outlineLvl w:val="0"/>', tf + "<w:b/><w:bCs/><w:caps/>" + tc, prox="Normal")
+    s += est("TituloSumario", "Título do sumário", centro, tf + "<w:b/><w:bCs/><w:caps/>" + tc, prox="Normal")
     s += est("TituloDocumento", "Título do documento", '<w:keepNext/><w:spacing w:before="0" w:after="60" w:line="276" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/>',
-             '<w:b/><w:bCs/><w:caps/><w:sz w:val="26"/><w:szCs w:val="26"/>')
+             tf + '<w:b/><w:bCs/><w:caps/>' + tc + '<w:sz w:val="26"/><w:szCs w:val="26"/>')
     peq = '<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/>'
     s += est("Legenda", "caption", '<w:keepNext/><w:spacing w:before="240" w:after="60" w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/>', '<w:sz w:val="20"/><w:szCs w:val="20"/>')
     s += est("Fonte", "Fonte de ilustração", '<w:spacing w:before="60" w:after="240" w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="left"/>', '<w:sz w:val="20"/><w:szCs w:val="20"/>')
@@ -1060,7 +955,7 @@ def numeracao_xml(ctx):
     a = [
         (1, nivel(0, "lowerLetter", "%1)", 1134, 425) + nivel(1, "bullet", "–", 1560, 426) + nivel(2, "bullet", "–", 1985, 425)),
         (2, nivel(0, "decimal", "%1.", 1134, 425) + nivel(1, "lowerLetter", "%2)", 1560, 426) + nivel(2, "bullet", "–", 1985, 425)),
-        (3, nivel(0, "bullet", "•", 1134, 425, "Arial") + nivel(1, "bullet", "–", 1560, 426) + nivel(2, "bullet", "–", 1985, 425)),
+        (3, nivel(0, "bullet", "•", 1134, 425, VISUAL.get("fonte_texto", "Arial")) + nivel(1, "bullet", "–", 1560, 426) + nivel(2, "bullet", "–", 1985, 425)),
         (4, nivel(0, "bullet", "☐", 1134, 425, "Segoe UI Symbol") + nivel(1, "bullet", "☐", 1560, 426, "Segoe UI Symbol") + nivel(2, "bullet", "–", 1985, 425)),
     ]
     s = f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering {NS}>'
@@ -1071,23 +966,31 @@ def numeracao_xml(ctx):
     return s + "</w:numbering>"
 
 
-def settings_xml(atualizar):
+def settings_xml(atualizar, embutir=False):
     u = '<w:updateFields w:val="true"/>' if atualizar else ""
+    e = "<w:embedTrueTypeFonts/>" if embutir else ""
     return (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings {NS}>'
-            f'<w:defaultTabStop w:val="709"/><w:hyphenationZone w:val="425"/><w:characterSpacingControl w:val="doNotCompress"/>{u}'
+            f'{e}<w:defaultTabStop w:val="709"/><w:hyphenationZone w:val="425"/><w:characterSpacingControl w:val="doNotCompress"/>{u}'
             '<w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat>'
             '<w:themeFontLang w:val="pt-BR"/><w:decimalSymbol w:val=","/><w:listSeparator w:val=";"/></w:settings>')
 
 # ----------------------------------------------------------------------------- validação da especificação
 def validar(spec):
     av = []
-    definir_empresa(str(spec.get("empresa") or EMPRESA_PADRAO).upper())
+    definir_empresa(str(spec.get("empresa") or ORG["padrao"]).upper())
     spec["empresa"] = EMPRESA_ID
     spec["estado"] = spec.get("estado", "MINUTA").upper().replace(" ", "_").replace("Ã", "A")
     if spec["estado"] not in ESTADOS: raise SystemExit(f"Estado inválido: {spec['estado']}")
     if spec["estado"] not in ESTADOS_ATIVOS:
         av.append(f'Estado {ESTADOS[spec["estado"]]["rotulo"].lower()} foi aposentado: use minuta para o texto que ainda não é oficial.')
     tipo = spec.get("tipo", "").upper()
+    # Empresa, tipo e área fora da lista de ativos do marca.json: valem para ler e versionar documento antigo.
+    if not EMPRESA.get("ativa", True):
+        av.append(f"Empresa {EMPRESA_ID} está aposentada no marca.json: use-a só para versionar documento antigo.")
+    if tipo and ORG["tipos_ativos"] and tipo not in ORG["tipos_ativos"]:
+        av.append(f"Tipo {tipo} não está entre os ativos do marca.json: sigla aposentada ou fora do padrão.")
+    if spec.get("area") and ORG["areas_ativas"] and str(spec["area"]).upper() not in ORG["areas_ativas"]:
+        av.append(f'Área {str(spec["area"]).upper()} não está entre as ativas do marca.json.')
     if spec["estado"] != "OBSOLETO" and spec.get("titulo"):
         novo = titulo_sem_tipo(spec["titulo"], tipo)
         if novo != spec["titulo"]:
@@ -1102,13 +1005,9 @@ def validar(spec):
         if tipo in TIPOS_CURTOS and not spec.get("ano"):
             spec["ano"] = int(spec["data_emissao"][-4:]) if re.match(r"\d{2}/\d{2}/\d{4}$", str(spec.get("data_emissao", ""))) else datetime.date.today().year
         spec["codigo"] = f"{EMPRESA_ID}-{tipo or 'DOC'}-{area}-{n}" + (f"/{spec['ano']}" if tipo in TIPOS_CURTOS else "")
-    if tipo and tipo not in TIPOS_CURTOS and tipo not in TIPOS_LONGOS:
-        av.append(f"Tipo {tipo} não está entre os tipos do padrão nem nos tipos_extra do marca.json.")
-    if str(spec.get("area", "")).upper() not in AREAS:
-        av.append(f"Área {spec.get('area')} não está entre as áreas do marca.json.")
     faltam = [] if EMPRESA.get("grupo") else [c for c in ("razao", "documento") if not EMPRESA.get(c)]
     if faltam:
-        nomes = " e ".join({"razao": "a razão social", "documento": f"o {EMPRESA['doc_rotulo']}"}[c] for c in faltam)
+        nomes = " e ".join({"razao": "a razão social", "documento": f'o {EMPRESA["documento_rotulo"]}'}[c] for c in faltam)
         if spec["estado"] in ("OFICIAL", "OBSOLETO"):
             raise SystemExit(f"Cadastre {nomes} de {EMPRESA['marca']} antes de emitir documento oficial.")
         av.append(f"{EMPRESA['marca']}: {nomes} ainda não está no cadastro; o cabeçalho mostra [definir].")
@@ -1176,7 +1075,7 @@ def montar(spec, ativos, paginas_sumario=None):
 
     if not longo:
         corpo += par(run(tipo_nome.upper() + (f' – {spec["titulo"]}' if spec.get("titulo") else ""), b=True), estilo="TituloDocumento")
-        corpo += par(run(f'{spec["codigo"]}  ·  Versão {spec["versao"]}  ·  Emissão {spec["data_emissao"]}  ·  ', sz=9, cor="404040") +
+        corpo += par(run(f'{spec["codigo"]}  ·  Versão {spec["versao"]}  ·  Emissão {spec["data_emissao"]}  ·  ', sz=9, cor=sec("404040")) +
                      run(est["rotulo"].upper(), sz=9, b=True, cor=est["cor"]), jc="center", antes=0, depois=240, linha=240, estilo="SemRecuo")
         if spec.get("identificacao"):
             ident = spec["identificacao"]   # empresa e documento já estão no cabeçalho
@@ -1190,9 +1089,10 @@ def montar(spec, ativos, paginas_sumario=None):
             return (f'<w:tr><w:trPr><w:trHeight w:val="{int(h_cm * TW_CM)}" w:hRule="exact"/></w:trPr><w:tc><w:tcPr><w:tcW w:w="{larg_t}" w:type="dxa"/>'
                     f'<w:vAlign w:val="{va}"/></w:tcPr>{conteudo}</w:tc></w:tr>')
         cp = lambda x, **k: par(x, jc="center", antes=k.get("antes", 0), depois=k.get("depois", 0), linha=k.get("linha", 276), estilo="SemRecuo")
-        meio = (cp(run(tipo_nome.upper(), sz=12, cor=EMPRESA["cor"], b=True, esp=40), depois=240) +
-                cp(run(spec["titulo"].upper(), b=True, sz=22), linha=300, depois=200) +
-                (cp(run(spec["subtitulo"], sz=14, cor="262626"), depois=480) if spec.get("subtitulo") else cp("", depois=480)))
+        ft = VISUAL.get("fonte_titulo")
+        meio = (cp(run(tipo_nome.upper(), sz=12, cor=EMPRESA["cor"], b=True, esp=40, fonte=ft), depois=240) +
+                cp(run(spec["titulo"].upper(), b=True, sz=22, fonte=ft, cor=VISUAL.get("cor_titulo")), linha=300, depois=200) +
+                (cp(run(spec["subtitulo"], sz=14, cor=sec("262626")), depois=480) if spec.get("subtitulo") else cp("", depois=480)))
         ctab = [["Código", spec["codigo"]], ["Versão", spec["versao"]], ["Estado", est["rotulo"].upper()], ["Classificação", spec["classificacao"]]]
         wqs = [int(larg_t * p / 4.6) for p in (1.6, 1, 1, 1)]
         quadro = (f'<w:tbl><w:tblPr><w:tblW w:w="{sum(wqs)}" w:type="dxa"/><w:jc w:val="center"/>'
@@ -1200,9 +1100,9 @@ def montar(spec, ativos, paginas_sumario=None):
                   '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/></w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr>'
                   f'<w:tblGrid>{grade(wqs)}</w:tblGrid><w:tr>')
         for (rot, val), wq in zip(ctab, wqs):
-            cor = est["cor"] if rot == "Estado" else "000000"
+            cor = est["cor"] if rot == "Estado" else cor_texto()
             quadro += (f'<w:tc><w:tcPr><w:tcW w:w="{wq}" w:type="dxa"/></w:tcPr>'
-                       f'{par(run(rot.upper(), sz=7, cor="595959", esp=10), jc="center", estilo="TabelaTexto", antes=60)}'
+                       f'{par(run(rot.upper(), sz=7, cor=sec("595959"), esp=10), jc="center", estilo="TabelaTexto", antes=60)}'
                        f'{par(run(val, b=True, sz=9.5, cor=cor), jc="center", estilo="TabelaTexto", depois=60)}</w:tc>')
         quadro += "</w:tr></w:tbl>"
         ano = spec["data_emissao"][-4:]
@@ -1224,7 +1124,7 @@ def montar(spec, ativos, paginas_sumario=None):
         ident = [["Título", spec["titulo"] + (f' – {spec["subtitulo"]}' if spec.get("subtitulo") else "")],
                  ["Tipo", tipo_nome], ["Código", spec["codigo"]], ["Versão", spec["versao"]],
                  ["Estado", f'**{est["rotulo"].upper()}**'], ["Classificação", spec["classificacao"]],
-                 ["Área responsável", spec.get("area_nome") or AREAS.get(spec.get("area"), spec.get("area", ""))],
+                 ["Área responsável", spec.get("area_nome") or AREAS.get(str(spec.get("area", "")).upper(), spec.get("area", ""))],
                  ["Elaborado por", spec.get("elaborado_por", "")], ["Revisado por", spec.get("revisado_por", "")],
                  ["Aprovado por", spec.get("aprovado_por") or "Pendente – documento não aprovado"],
                  ["Data de emissão", spec["data_emissao"]],
@@ -1291,7 +1191,48 @@ TIPOS_REL = {"image": "http://schemas.openxmlformats.org/officeDocument/2006/rel
              "styles": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles",
              "numbering": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering",
              "settings": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings",
-             "customXml": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml"}
+             "customXml": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml",
+             "fontTable": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable",
+             "font": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/font"}
+
+
+def chave_fonte(dados):
+    """GUID da fonte embutida, tirado do próprio arquivo (o mesmo arquivo dá o mesmo documento)."""
+    import zlib
+    b = b"".join(struct.pack(">I", zlib.crc32(bytes([k]) + dados)) for k in range(4))
+    h = b.hex().upper()
+    return "{%s-%s-%s-%s-%s}" % (h[:8], h[8:12], h[12:16], h[16:20], h[20:])
+
+
+def ofuscar_fonte(dados, chave):
+    """Fonte embutida do Word (ECMA-376, 17.8.1): os 32 primeiros bytes em XOR com a chave, bytes ao contrário."""
+    k = bytes.fromhex(chave.strip("{}").replace("-", ""))[::-1]
+    d = bytearray(dados)
+    for i in range(32):
+        d[i] ^= k[i % 16]
+    return bytes(d)
+
+
+def partes_fontes(ctx, fontes):
+    """fontTable.xml e as fontes ofuscadas (word/fonts/fontN.odttf), na ordem do visual: texto, depois títulos."""
+    if not fontes:
+        return None, []
+    tag = {"regular": "embedRegular", "negrito": "embedBold", "italico": "embedItalic", "negrito_italico": "embedBoldItalic"}
+    familias = [f for f in (VISUAL.get("fonte_texto"), VISUAL.get("fonte_titulo")) if f]
+    familias = [f for i, f in enumerate(familias) if f not in familias[:i]]
+    xml, arquivos = "", []
+    for fam in familias:
+        emb = ""
+        for est in ESTILOS_FONTE:
+            dados = next((d for f, e, d in fontes if f == fam and e == est), None)
+            if dados is None:
+                continue
+            nome = f"font{len(arquivos) + 1}.odttf"; chave = chave_fonte(dados)
+            rid = ctx.rel("word/fontTable.xml", "font", f"fonts/{nome}")
+            emb += f'<w:{tag[est]} r:id="{rid}" w:fontKey="{chave}"/>'
+            arquivos.append((f"word/fonts/{nome}", ofuscar_fonte(dados, chave)))
+        xml += f'<w:font w:name="{escape(fam)}"><w:charset w:val="00"/><w:family w:val="roman"/><w:pitch w:val="variable"/>{emb}</w:font>'
+    return f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:fonts {NS}>{xml}</w:fonts>', arquivos
 
 
 VERSAO_TIMBRADOR = "2026-09-16"
@@ -1299,20 +1240,21 @@ CAMPOS_FICHA = ["empresa", "tipo", "area", "area_nome", "numero", "ano", "codigo
                 "titulo", "subtitulo", "titulo_curto", "classificacao", "local", "data_emissao",
                 "elaborado_por", "revisado_por", "aprovado_por", "cargo_aprovador", "data_aprovacao", "vigencia",
                 "substitui", "substituido_por", "motivo_obsoleto", "identificacao", "historico",
-                "modelo", "com_assinatura", "envolvidos", "assinatura_formato", "assinaturas_previstas",
-                "com_anexos", "anexos_externos", "projeto"]   # modelo: True só nos arquivos de partida dos modelos oficiais
+                "modelo", "com_assinatura", "envolvidos", "assinatura_formato"]   # modelo: True só nos arquivos de partida dos modelos oficiais
 
 # Campos de um arquivo de partida que NÃO passam para o documento escrito a partir dele.
 CAMPOS_SO_DO_MODELO = ("modelo", "codigo", "numero", "ano", "versao", "estado", "titulo", "subtitulo", "titulo_curto",
                        "elaborado_por", "revisado_por", "aprovado_por", "cargo_aprovador", "data_aprovacao", "vigencia",
                        "substitui", "substituido_por", "motivo_obsoleto", "historico", "data_emissao")
+# Namespace da ficha embutida. A leitura aceita qualquer namespace terminado em "timbrador:ficha", inclusive o
+# dos documentos emitidos antes do white label.
 NS_FICHA = "urn:timbrador:ficha"
+MARCA_FICHA = "timbrador:ficha"
 
 
 def ficha_de(spec):
     f = {k: spec[k] for k in CAMPOS_FICHA if spec.get(k) not in (None, "", [])}
-    if MARCA["politica"].get("codigo"):
-        f["padrao"] = MARCA["politica"]["codigo"]
+    if ORG["politica"]: f["padrao"] = ORG["politica"]
     f["timbrador"] = VERSAO_TIMBRADOR
     return f
 
@@ -1337,6 +1279,9 @@ def partes_ficha(spec):
 def gravar(spec, ativos, saida, paginas_sumario=None, atualizar_campos=False):
     ctx, documento, extras = montar(spec, ativos, paginas_sumario)
     ctx.rel("word/document.xml", "customXml", "../customXml/item1.xml")
+    tabela_fontes, fontes_ofuscadas = partes_fontes(ctx, ativos.get("fontes"))
+    if tabela_fontes:
+        ctx.rel("word/document.xml", "fontTable", "fontTable.xml")
     item_ficha, props_ficha, custom_props = partes_ficha(spec)
     agora = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     est = ESTADOS[spec["estado"]]
@@ -1348,6 +1293,9 @@ def gravar(spec, ativos, saida, paginas_sumario=None, atualizar_campos=False):
                    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
                    '<Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/>'
                    '<Default Extension="jpeg" ContentType="image/jpeg"/>'
+                   + ('<Default Extension="odttf" ContentType="application/vnd.openxmlformats-officedocument.obfuscatedFont"/>'
+                      '<Override PartName="/word/fontTable.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"/>'
+                      if tabela_fontes else "") +
                    '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
                    '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
                    '<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>'
@@ -1385,7 +1333,11 @@ def gravar(spec, ativos, saida, paginas_sumario=None, atualizar_campos=False):
         z.writestr("word/document.xml", documento)
         z.writestr("word/styles.xml", estilos_xml())
         z.writestr("word/numbering.xml", numeracao_xml(ctx))
-        z.writestr("word/settings.xml", settings_xml(atualizar_campos))
+        z.writestr("word/settings.xml", settings_xml(atualizar_campos, bool(tabela_fontes)))
+        if tabela_fontes:
+            z.writestr("word/fontTable.xml", tabela_fontes)
+            for nome, dados in fontes_ofuscadas:
+                z.writestr(nome, dados)
         for parte, (t, conteudo) in extras.items():
             raiz = "hdr" if t == "hdr" else "ftr"
             z.writestr(parte, f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:{raiz} {NS}>{conteudo}</w:{raiz}>')
@@ -1440,7 +1392,7 @@ import xml.etree.ElementTree as ET
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 _R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
-RE_CODIGO = re_codigo()   # refeito por carregar_marca, com as siglas do marca.json
+RE_CODIGO = re.compile(r"\b([A-Z0-9]{2,6})-([A-Z]{2,3})-([A-Z]{2,3})-(\d{3}|XXX)(?:/(\d{4}))?\s+·\s+(?:v|[Vv]ersão\s+)([0-9][0-9.]*(?:-r\d+)?)")
 
 
 def _wval(el, tag):
@@ -1492,7 +1444,7 @@ def ler_timbrado(caminho, pasta_midia=None):
         for n in nomes:
             if re.match(r"customXml/item\d+\.xml$", n):
                 x = z.read(n).decode("utf8")
-                if NS_FICHA in x:
+                if MARCA_FICHA in x:
                     raiz = ET.fromstring(x)
                     spec = json.loads(raiz.text or "{}")
                     info["origem"] = "ficha"
@@ -1516,7 +1468,7 @@ def ler_timbrado(caminho, pasta_midia=None):
             if mo: spec["aprovado_por"], spec["data_aprovacao"] = mo.group(1).strip(), mo.group(2)
             ms = re.search(r"SUBSTITUÍDO POR (\S+)", cab)
             if ms: spec["substituido_por"] = ms.group(1)
-            info["avisos"].append("Documento sem ficha: dados lidos do cabeçalho; confira título e responsáveis.")
+            info["avisos"].append("Documento sem ficha (gerado antes de 16/09/2026): dados lidos do cabeçalho; confira título e responsáveis.")
     rels = {}
     if "word/_rels/document.xml.rels" in nomes:
         for m in re.finditer(r'<Relationship [^>]*Id="([^"]+)"[^>]*Target="([^"]+)"', z.read("word/_rels/document.xml.rels").decode("utf8")):
@@ -1751,7 +1703,7 @@ def ler_timbrado(caminho, pasta_midia=None):
         spec["titulo"], spec["subtitulo"] = campos_controle["Título"].split(" – ", 1)
     if hist and not spec.get("historico"):
         spec["historico"] = hist
-    spec["corpo"] = extrair_anexos(corpo)     # a seção Anexos é refeita a partir da lista da ficha
+    spec["corpo"] = corpo
     if info["origem"] == "sem_timbrado":
         info["avisos"].append("Não é um documento do padrão: conteúdo lido como documento novo.")
     if spec.get("codigo") is None and spec.get("tipo"):
@@ -1780,7 +1732,7 @@ def lista_caminho(caminho):
 
 def carregar_lista(caminho):
     alvo = lista_caminho(caminho)
-    base = {"lista_mestra": MARCA["organizacao"], "padrao": MARCA["politica"].get("codigo", ""), "atualizado_em": "", "documentos": []}
+    base = {"lista_mestra": ORG["organizacao"], "padrao": ORG["politica"], "atualizado_em": "", "documentos": []}
     if os.path.exists(alvo):
         texto = open(alvo, encoding="utf8").read().strip()
         if texto:
@@ -1823,7 +1775,7 @@ def codigo_de(spec):
     num = spec.get("numero")
     n = f"{int(num):03d}" if num else "XXX"
     ano = spec.get("ano") or (spec.get("data_emissao", "")[-4:] if re.match(r"\d{2}/\d{2}/\d{4}$", str(spec.get("data_emissao", ""))) else datetime.date.today().year)
-    return f"{spec.get('empresa') or EMPRESA_PADRAO}-{tipo}-{area}-{n}" + (f"/{ano}" if tipo in TIPOS_CURTOS else "")
+    return f"{spec.get('empresa') or ORG['padrao']}-{tipo}-{area}-{n}" + (f"/{ano}" if tipo in TIPOS_CURTOS else "")
 
 
 def _mesma_familia(d, spec, ano):
@@ -1843,7 +1795,7 @@ OUTROS_NOMES = {"POP": ["Procedimento operacional", "Procedimento"], "CI": ["Com
 
 
 def titulo_sem_tipo(titulo, tipo):
-    """Regra de título: o título diz só o assunto; o tipo já sai impresso acima dele.
+    """Regra de título da política de documentação: o título diz só o assunto; o tipo já sai impresso acima dele.
     Tira do começo do título o nome do tipo, o conectivo e um separador que venham em seguida."""
     t = str(titulo or "").strip()
     nomes = sorted([n for n in [TIPOS_CURTOS.get(tipo), TIPOS_LONGOS.get(tipo)] + OUTROS_NOMES.get(tipo, []) if n], key=len, reverse=True)
@@ -1884,12 +1836,12 @@ def conferir_lista(lista, spec, atualizacao=False):
 
 
 def _mesmo_codigo(substituido_por, spec):
-    """'SUA-CI-ADM-002/2026 v1.2' substitui o mesmo código do documento?"""
+    """'ABC-CI-ADM-002/2026 v1.2' substitui o mesmo código do documento?"""
     alvo = str(substituido_por or "").split(" v")[0].strip()
     codigo = str(spec.get("codigo") or "").strip()
     if not codigo and str(spec.get("numero") or "").isdigit():
         tipo = str(spec.get("tipo", "")).upper()
-        codigo = f'{spec.get("empresa") or EMPRESA_PADRAO}-{tipo}-{str(spec.get("area", "ADM")).upper()}-{int(spec["numero"]):03d}' + \
+        codigo = f'{spec.get("empresa") or ORG["padrao"]}-{tipo}-{str(spec.get("area", "ADM")).upper()}-{int(spec["numero"]):03d}' + \
                  (f'/{spec.get("ano")}' if tipo in TIPOS_CURTOS and spec.get("ano") else "")
     return bool(alvo) and alvo == codigo
 
@@ -1901,10 +1853,8 @@ def registro_de(spec, arquivo):
            "ano": spec.get("ano"), "versao": spec.get("versao"), "estado": spec.get("estado"),
            "data": spec.get("data_aprovacao") or spec.get("data_emissao"),
            "responsavel": spec.get("elaborado_por", ""), "arquivo": os.path.basename(arquivo)}
-    if spec.get("substituido_por") and spec.get("estado") == "OBSOLETO":   # só vale para obsoleto
+    if spec.get("substituido_por"):
         reg["substituido_por"] = spec["substituido_por"]
-    if spec.get("projeto"):
-        reg["projeto"] = spec["projeto"]
     return reg
 
 
@@ -1919,7 +1869,7 @@ def gravar_lista(caminho, registro):
 
 
 # ----------------------------------------------------------------------------- inventário da pasta
-RE_NOME = re.compile(r"^([A-Z][A-Z0-9]{1,5})-([A-Z0-9]{2,6})-([A-Z0-9]{2,6})-(\d{3}|XXX)(?:-(\d{4}))?"
+RE_NOME = re.compile(r"^([A-Z0-9]{2,6})-([A-Z]{2,4})-([A-Z]{2,4})-(\d{3}|XXX)(?:-(\d{4}))?"
                      r"_v([0-9][0-9.]*(?:-r\d+)?)_([A-Z_]+)_(.+)\.docx$", re.I)
 ORDEM_ESTADO = {"OBSOLETO": 0, "RASCUNHO": 1, "MINUTA": 2, "EM_REVISAO": 3, "EM_APROVACAO": 3, "OFICIAL": 4}
 
@@ -1941,7 +1891,7 @@ def ficha_rapida(caminho):
         for n in nomes:
             if re.match(r"customXml/item\d+\.xml$", n):
                 x = z.read(n).decode("utf8")
-                if NS_FICHA in x:
+                if MARCA_FICHA in x:
                     try:
                         spec = json.loads(ET.fromstring(x).text or "{}")
                         origem = "ficha"
@@ -1996,33 +1946,16 @@ def achar_lista(pasta):
 
 # Pastas puladas por padrão na varredura: o arquivo morto não faz parte do que está em uso.
 # Para inventariar o próprio arquivo morto, aponte --inventariar para ele: a raiz nunca é pulada.
-# Modelos (arquivos de partida e saídas antigas de conversas) fica fora da varredura. OBSOLETOS é lida, mas só decide
-# a entrada de um código que não tem mais nenhuma versão em uso. Mesmas regras do inventário da página.
-PASTAS_IGNORADAS = ("modelos",)
-
-
-def projeto_da_pasta(pasta):
-    """Projeto de uma pasta registrada: "Projetos/Novo Site/…" → "Novo Site"."""
-    partes = str(pasta or "").replace("\\", "/").split("/")
-    for i, x in enumerate(partes[:-1]):
-        if _sem_acento(x) == "projetos" and partes[i + 1]:
-            return partes[i + 1]
-    return ""
-
-
-def _eh_pasta_obsoletos(rel):
-    return any(p.lower() == "obsoletos" for p in str(rel or "").replace("\\", "/").split("/"))
+PASTAS_IGNORADAS = ("obsoletos",)
 
 
 def inventariar(pasta, destino=None, gravar=True, ignorar=()):
     """Varre a pasta dos documentos e monta a lista mestra do que já existe."""
     pasta = os.path.abspath(pasta)
     ignorar = [i.lower() for i in (ignorar or ())] + [i for i in PASTAS_IGNORADAS]
-    achados, ignorados, sem_id, listas, modelos, visitadas = [], [], [], [], [], set()
+    achados, ignorados, sem_id, listas, modelos = [], [], [], [], []
     for raiz, dirs, arquivos in os.walk(pasta):
         dirs[:] = sorted(d for d in dirs if d.lower() not in ignorar and not d.startswith("."))
-        rel_raiz = os.path.relpath(raiz, pasta).replace(os.sep, "/")
-        visitadas.add("" if rel_raiz == "." else rel_raiz)
         for nome in sorted(arquivos):
             if nome == LISTA_ARQUIVO:
                 listas.append(os.path.join(raiz, nome))
@@ -2054,14 +1987,13 @@ def inventariar(pasta, destino=None, gravar=True, ignorar=()):
             sigla = sigla_da_pasta(os.path.basename(raiz))
             if sigla:
                 spec.setdefault("tipo", sigla)
-            spec.setdefault("empresa", EMPRESA_PADRAO)
+            spec.setdefault("empresa", ORG["padrao"])
             spec.setdefault("estado", "MINUTA")
             spec.setdefault("versao", "1.0")
             spec.setdefault("titulo", os.path.splitext(nome)[0])
             spec["codigo"] = codigo_de(spec)
-            pasta_rel = os.path.dirname(rel).replace(os.sep, "/") or "."
-            achados.append({"spec": spec, "origem": origem, "rel": rel, "nome": nome, "pasta": pasta_rel,
-                            "obsoleta": _eh_pasta_obsoletos(pasta_rel) or spec.get("estado") == "OBSOLETO"})
+            achados.append({"spec": spec, "origem": origem, "rel": rel, "nome": nome,
+                            "pasta": os.path.dirname(rel) or "."})
 
     # uma entrada por código: fica a versão mais alta; as demais viram histórico de arquivos
     if not destino:
@@ -2075,40 +2007,11 @@ def inventariar(pasta, destino=None, gravar=True, ignorar=()):
         chave = a["spec"]["codigo"] if a["spec"].get("numero") else f'{a["spec"]["codigo"]}|{a["nome"]}'
         por_codigo.setdefault(chave, []).append(a)
     lista = carregar_lista(destino or pasta)
-    conflitos, multiplos, alertas, vistos = [], [], [], set()
-    versao_base = lambda v: str(v or "").split("-r")[0]
-    for chave_grupo, itens in sorted(por_codigo.items()):
-        codigo = chave_grupo.split("|")[0]
+    conflitos, multiplos = [], []
+    for codigo, itens in sorted(por_codigo.items()):
         itens.sort(key=lambda x: (_chave_versao(x["spec"].get("versao")),
                                   ORDEM_ESTADO.get(x["spec"].get("estado"), 0)))
-        em_uso = [i for i in itens if not i["obsoleta"]]
-        oficiais = [i for i in em_uso if i["spec"].get("estado") == "OFICIAL"]
-        copias = [i for i in itens if i["obsoleta"]]
-        atual = (oficiais or em_uso or copias)[-1]
-        # oficial cuja versão já tem cópia obsoleta: foi substituída e o arquivo ficou para trás na pasta
-        ja = next((c for c in copias if atual["spec"].get("estado") == "OFICIAL" and
-                   _chave_versao(c["spec"].get("versao")) >= _chave_versao(atual["spec"].get("versao"))), None)
-        if ja:
-            alertas.append(f'{codigo} v{atual["spec"].get("versao")}: o arquivo oficial ainda está em {atual["pasta"]}, mas essa '
-                           f'versão já tem cópia obsoleta em {ja["pasta"]}. Retire o oficial da pasta.')
-            atual = ja
-        if len(oficiais) > 1:
-            alertas.append(f'{codigo}: mais de uma versão oficial em uso (' +
-                           "; ".join(f'v{o["spec"].get("versao")} em {o["pasta"]}' for o in oficiais) +
-                           "). A anterior precisa ser tornada obsoleta.")
-        if oficiais:
-            ult = oficiais[-1]["spec"].get("versao")
-            for m in em_uso:
-                if m["spec"].get("estado") != "OFICIAL" and _chave_versao(versao_base(m["spec"].get("versao"))) <= _chave_versao(versao_base(ult)):
-                    alertas.append(f'{codigo}: a versão {m["spec"].get("versao")} ({m["spec"].get("estado")}, em {m["pasta"]}) é de uma '
-                                   f'versão já publicada (v{ult}) e pode sair da pasta.')
-        for c in copias:
-            if not _eh_pasta_obsoletos(c["pasta"]):
-                alertas.append(f'{c["nome"]}: cópia obsoleta fora da pasta OBSOLETOS (está em {c["pasta"]}).')
-        for m in em_uso:
-            pj = m["spec"].get("projeto")
-            if pj and _sem_acento(projeto_da_pasta(m["pasta"])) != _sem_acento(pj):
-                alertas.append(f'{m["nome"]}: é do projeto "{pj}", mas está em {m["pasta"]}. Documento de projeto fica em Projetos/{pj}.')
+        atual = itens[-1]
         titulos = {_sem_acento(i["spec"].get("titulo")) for i in itens if i["spec"].get("titulo")}
         if len(titulos) > 1:
             conflitos.append((codigo, sorted({i["spec"].get("titulo", "") for i in itens})))
@@ -2118,32 +2021,16 @@ def inventariar(pasta, destino=None, gravar=True, ignorar=()):
         reg = registro_de(spec, atual["nome"])
         reg["pasta"] = atual["pasta"]
         reg["origem"] = atual["origem"]
-        if not reg.get("projeto") and projeto_da_pasta(atual["pasta"]):   # documento antigo, sem o campo na ficha
-            reg["projeto"] = projeto_da_pasta(atual["pasta"])
         if len(itens) > 1:
             reg["arquivos"] = len(itens)
         lista = _mesclar_em(lista, reg)
-        vistos.add(chave_registro(reg))
-    # entradas sem arquivo: saem quando a pasta registrada foi varrida (ou é a de Modelos); fora disso, ficam e são avisadas
-    removidas, nao_conferidas, ficam = [], [], []
-    for d in lista["documentos"]:
-        if chave_registro(d) in vistos:
-            ficam.append(d); continue
-        if "pasta" not in d:
-            nao_conferidas.append(f'{d.get("codigo")} (sem pasta registrada)'); ficam.append(d); continue
-        p = "" if d["pasta"] == "." else str(d["pasta"])
-        if any(x.lower() in PASTAS_IGNORADAS for x in p.split("/")) or p in visitadas:
-            removidas.append(f'{d.get("codigo")} v{d.get("versao")} ({d.get("arquivo") or p})')
-        else:
-            nao_conferidas.append(f'{d.get("codigo")} ({p})'); ficam.append(d)
-    lista["documentos"] = ficam
     versoes_ruins = sorted({(a["spec"]["codigo"], str(a["spec"].get("versao"))) for a in achados
                             if not RE_VERSAO_OK.match(str(a["spec"].get("versao") or ""))})
     sem_numero = sorted({(a["spec"]["codigo"], a["nome"]) for a in achados if not a["spec"].get("numero")})
     relatorio = {"pasta": pasta, "arquivos_docx": len(achados), "documentos": len(por_codigo),
                  "versoes_fora_do_padrao": versoes_ruins, "sem_numero": sem_numero,
                  "ignorados": ignorados, "modelos": modelos, "sem_identificacao": sem_id, "conflitos": conflitos,
-                 "varias_versoes": multiplos, "alertas": alertas, "removidas": removidas, "nao_conferidas": nao_conferidas,
+                 "varias_versoes": multiplos,
                  "por_origem": {o: sum(1 for a in achados if a["origem"] == o) for o in ("ficha", "cabecalho", "nome")},
                  "por_tipo": {}, "por_estado": {}, "listas_encontradas": listas}
     for a in achados:
@@ -2243,27 +2130,8 @@ def obsoleto_da_anterior(anterior, nova):
     return velha
 
 
-def gerar(spec, ativos, saida, anexos=None):
+def gerar(spec, ativos, saida):
     avisos = validar(spec)
-    if spec.get("estado") != "OBSOLETO":
-        av = adiar_assinaturas(spec)
-        if av: avisos.append(av)
-    # "anexos_externos": arquivos (caminhos) a anexar, ou a lista registrada na ficha. Não confundir com "anexos",
-    # os anexos ABNT dentro do documento longo.
-    arquivos_anexos = list(anexos or []) + [x for x in spec.get("anexos_externos") or [] if isinstance(x, str)]
-    spec["anexos_externos"] = [x for x in spec.get("anexos_externos") or [] if isinstance(x, dict)]
-    if not spec["anexos_externos"]: spec.pop("anexos_externos")
-    if spec.get("com_anexos") or arquivos_anexos:
-        if spec.get("estado") != "OBSOLETO":
-            # documento e anexos juntos numa pasta com o código (a própria --saida, se ela já for essa pasta)
-            if saida.lower().endswith(".docx"):
-                pasta_doc = os.path.dirname(os.path.abspath(saida))
-            else:
-                pasta_doc = saida if os.path.basename(os.path.normpath(saida)) == nome_pasta_doc(spec) else os.path.join(saida, nome_pasta_doc(spec))
-                saida = pasta_doc
-            avisos += preparar_anexos(spec, arquivos_anexos, pasta_doc)
-        montar_anexos(spec)
-    spec.pop("anexos_origem", None)
     if not saida.lower().endswith(".docx"):
         os.makedirs(saida, exist_ok=True)
         saida = os.path.join(saida, nome_arquivo(spec))
@@ -2282,13 +2150,21 @@ def gerar(spec, ativos, saida, anexos=None):
         pags = paginas_dos_titulos(saida, tit)
         ctx = gravar(spec, ativos, saida, pags, atualizar_campos=pags is None)
         if pags is None: avisos.append("Sumário sem números de página (LibreOffice indisponível): o Word pedirá para atualizar os campos ao abrir.")
+    pdf = None
+    if GERAR_PDF:
+        pdf = para_pdf(saida, os.path.dirname(os.path.abspath(saida)))
+        if not pdf: avisos.append("PDF não gerado (LibreOffice indisponível).")
     for av in avisos + ctx.avisos: print("AVISO:", av)
     print(saida)
+    if pdf: print(pdf)
     return saida
 
 
-def localizar_marca(arg, spec_path):
-    """--marca; senão TIMBRADOR_MARCA; senão marca.json ao lado da especificação; senão assets/marca.json da habilidade."""
+GERAR_PDF = False   # --pdf: grava também o PDF de conferência ao lado de cada .docx
+
+
+def localizar_marca(arg, spec_path=None):
+    """--marca, TIMBRADOR_MARCA, marca.json ao lado da especificação ou em assets/ da habilidade."""
     candidatos = [arg, os.environ.get("TIMBRADOR_MARCA"),
                   os.path.join(os.path.dirname(os.path.abspath(spec_path)), "marca.json") if spec_path else None,
                   os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "marca.json")]
@@ -2300,14 +2176,13 @@ def localizar_marca(arg, spec_path):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Timbrador white label: gerador do Padrão de Documentação Oficial")
+    ap = argparse.ArgumentParser(description="Timbrador white label: Padrão de Documentação Oficial (ABNT + papel timbrado)")
     ap.add_argument("spec", nargs="?", help="especificação JSON do documento a gerar")
-    ap.add_argument("--marca", help="marca.json da organização (empresas, logos, áreas)")
-    ap.add_argument("--checar-marca", metavar="MARCA", help="confere o marca.json e mostra o resumo")
-    ap.add_argument("--embutir-logos", metavar="MARCA", help="grava uma cópia do marca.json com os logos embutidos")
-    ap.add_argument("--montar-pagina", metavar="MARCA", help="grava uma cópia da página timbrador.html com a marca embutida")
-    ap.add_argument("--pdf", action="store_true", help="salva também o PDF de conferência (precisa do LibreOffice)")
+    ap.add_argument("--marca", help="marca.json da organização (padrão: TIMBRADOR_MARCA, ao lado da especificação ou assets/marca.json)")
     ap.add_argument("--saida", default=".")
+    ap.add_argument("--pdf", action="store_true", help="grava também o PDF de conferência (precisa do LibreOffice)")
+    ap.add_argument("--checar-marca", metavar="MARCA", help="confere o marca.json e mostra o resumo do cadastro")
+    ap.add_argument("--embutir-logos", metavar="MARCA", help="grava uma cópia do marca.json com os logos em data URI")
     ap.add_argument("--ler", metavar="DOCX", help="lê um documento timbrado e imprime a especificação JSON (ficha + corpo)")
     ap.add_argument("--atualizar", metavar="DOCX", help="lê um documento timbrado e prepara a especificação da nova versão")
     ap.add_argument("--mudanca", choices=["conteudo", "correcao"], default="conteudo", help="para documento OFICIAL: mudança de conteúdo (X+1.0) ou só correção (X.Y+1)")
@@ -2320,30 +2195,23 @@ def main():
     ap.add_argument("--ignorar", metavar="PASTA", action="append", default=[], help="com --inventariar: nome de pasta a pular (pode repetir)")
     ap.add_argument("--lista", metavar="CAMINHO", help="lista mestra (pasta dos documentos ou o próprio lista-mestra.json): confere o número e registra a publicação")
     ap.add_argument("--obsoletar", metavar="DOCX", help="gera a cópia OBSOLETO de um documento OFICIAL (use o arquivo original, sem alterações)")
-    ap.add_argument("--substituido-por", help="com --obsoletar: código e versão que substituem, ex.: 'SUA-CI-ADM-004/2026 v2.0'")
-    ap.add_argument("--anexo", metavar="ARQUIVO", action="append", default=[],
-                    help="anexo externo (pode repetir): documento e anexos vão juntos para uma pasta com o código do documento")
+    ap.add_argument("--substituido-por", help="com --obsoletar: código e versão que substituem, ex.: 'ABC-CI-ADM-004/2026 v2.0'")
     ap.add_argument("--json-saida", help="arquivo para gravar a especificação lida/preparada (padrão: tela)")
     a = ap.parse_args()
+    global GERAR_PDF
+    GERAR_PDF = a.pdf
 
     if a.checar_marca:
         carregar_marca(a.checar_marca)
         print(resumo_marca())
         return
     if a.embutir_logos:
-        carregar_marca(a.embutir_logos)
         destino = a.saida if a.saida.lower().endswith(".json") else os.path.join(
             a.saida, os.path.splitext(os.path.basename(a.embutir_logos))[0] + "_portatil.json")
-        with open(destino, "w", encoding="utf8") as f:
-            json.dump(marca_portatil(a.embutir_logos), f, ensure_ascii=False, indent=2)
-        print(destino)
+        carregar_marca(a.embutir_logos)   # confere antes de copiar
+        print(embutir_logos(a.embutir_logos, destino))
         return
-    if a.montar_pagina:
-        carregar_marca(a.montar_pagina)
-        destino = a.saida if a.saida.lower().endswith((".html", ".htm")) else os.path.join(a.saida, "timbrador.html")
-        print(montar_pagina(a.montar_pagina, destino))
-        return
-    ativos = carregar_marca(localizar_marca(a.marca, a.spec or a.ler or a.atualizar or a.obsoletar))
+    ativos = carregar_marca(localizar_marca(a.marca, a.spec))
 
     if a.inventariar:
         lista, r = inventariar(a.inventariar, a.lista, gravar=not a.conferir, ignorar=a.ignorar)
@@ -2362,16 +2230,8 @@ def main():
                   f'{(d.get("titulo") or "")[:46]:<46} {d.get("pasta", "."):<10} {d.get("responsavel") or "-"}')
         print("\n  (* dados lidos do cabeçalho ou do nome do arquivo: confira título e responsável)" if any(
             d.get("origem") in ("nome", "cabecalho") for d in lista["documentos"]) else "")
-        for al in r["alertas"]:
-            print(f"  ATENÇÃO — {al}")
-        if r["removidas"]:
-            print(f"  Saíram da lista {len(r['removidas'])} entrada(s) cujo arquivo não está mais na pasta:")
-            for x in r["removidas"]:
-                print(f"    {x}")
-        if r["nao_conferidas"]:
-            print(f"  {len(r['nao_conferidas'])} entrada(s) ficaram sem conferir (pasta não varrida): " + "; ".join(r["nao_conferidas"]))
         if r["varias_versoes"]:
-            print(f"  {len(r['varias_versoes'])} documento(s) com mais de um arquivo (na lista ficou a versão em uso: a oficial mais alta, quando há):")
+            print(f"  {len(r['varias_versoes'])} documento(s) com mais de um arquivo na pasta (ficou a versão mais alta):")
             for codigo, vs in r["varias_versoes"][:20]:
                 print(f"    {codigo}: {', '.join(vs)}")
         if r["conflitos"]:
@@ -2414,7 +2274,7 @@ def main():
         saida_velha = gerar(velha, ativos, a.saida)
         if a.lista and _mesmo_codigo(a.substituido_por, velha):
             print("LISTA MESTRA: não alterada — a substituição é nova versão do mesmo código, e a entrada aponta a vigente.")
-        elif a.lista:   # substituído por outro código (ex.: SUA-POL-ADM-001 → OUTRA-POL-ADM-001): o código antigo sai de uso
+        elif a.lista:   # substituído por outro código (ex.: ABC-POL-ADM-001 → GRP-POL-ADM-001): o código antigo sai de uso
             gravar_lista(a.lista, registro_de(velha, saida_velha))
             print(f"LISTA MESTRA: {lista_caminho(a.lista)} atualizada ({velha['codigo']} marcado como obsoleto).")
         return
@@ -2433,8 +2293,6 @@ def main():
             spec["anterior"] = {k: v for k, v in anterior.items()}
             # impressão digital do bloco "anterior": é dele que sai a cópia obsoleta, que tem de ser igual à vigente
             spec["anterior_conferencia"] = _digital(spec["anterior"])
-            if spec.get("com_anexos"):   # os anexos registrados estão na pasta do documento lido
-                spec["anexos_origem"] = os.path.dirname(os.path.abspath(a.atualizar))
         texto = json.dumps(spec, ensure_ascii=False, indent=2)
         if a.json_saida:
             open(a.json_saida, "w", encoding="utf8").write(texto)
@@ -2447,12 +2305,6 @@ def main():
     if not a.spec:
         ap.error("informe a especificação JSON, --ler ou --atualizar")
     spec = json.load(open(a.spec, encoding="utf8"))
-    # figuras com caminho relativo: a partir da pasta da especificação
-    base_spec = os.path.dirname(os.path.abspath(a.spec))
-    for b in [x for x in spec.get("corpo") or [] if isinstance(x, dict)] + [x for ap_ in (spec.get("apendices") or []) + (spec.get("anexos") or [])
-                                                                          for x in ap_.get("corpo") or [] if isinstance(x, dict)]:
-        if b.get("t") == "figura" and b.get("caminho") and not os.path.isabs(b["caminho"]):
-            b["caminho"] = os.path.join(base_spec, b["caminho"])
     anterior = spec.pop("anterior", None)
     conferencia = spec.pop("anterior_conferencia", None)
     if anterior and conferencia and _digital(anterior) != conferencia:
@@ -2478,20 +2330,17 @@ def main():
             raise SystemExit("LISTA MESTRA: " + " ".join(erros))
         if not spec.get("elaborado_por"):
             print("AVISO: sem 'elaborado_por': a lista mestra vai registrar a publicação sem responsável.")
-    saida = gerar(spec, ativos, a.saida, a.anexo)
-    if a.pdf:
-        pdf = para_pdf(saida, os.path.dirname(os.path.abspath(saida)))
-        print(f"PDF: {pdf}" if pdf else "AVISO: PDF não gerado (LibreOffice indisponível).")
+    saida = gerar(spec, ativos, a.saida)
     if lista is not None:
         lista = gravar_lista(a.lista, registro_de(spec, saida))
         print(f"LISTA MESTRA: {lista_caminho(a.lista)} ({len(lista['documentos'])} documentos)")
     if anterior and spec["estado"] == "OFICIAL" and anterior.get("estado") == "OFICIAL" and spec.get("gerar_obsoleto_anterior", True):
         velha = obsoleto_da_anterior(anterior, spec)
         print("AVISO: gerada também a versão anterior marcada como OBSOLETO (arquive-a e retire de uso).")
-        definir_empresa(velha.get("empresa") or EMPRESA_PADRAO)
+        definir_empresa(velha.get("empresa") or ORG["padrao"])
         saida_velha = gerar(velha, ativos, a.saida)
         # a cópia obsoleta não entra na lista: a entrada do código aponta a versão vigente, que acabou de ser registrada
-        definir_empresa(spec.get("empresa") or EMPRESA_PADRAO)
+        definir_empresa(spec.get("empresa") or ORG["padrao"])
 
 
 if __name__ == "__main__":
