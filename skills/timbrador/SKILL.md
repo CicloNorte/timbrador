@@ -35,7 +35,9 @@ Arquivos desta skill:
 
 Monte o arquivo a partir de `assets/marca.exemplo.json`. Campos opcionais da raiz: `organizacao` (nome da lista mestra), `empresa_padrao`, `politica` (código/título da norma interna; vai para a ficha e a lista mestra), `areas` para substituir a lista de áreas, `areas_extra` e `tipos_extra` `{"SIG": {"nome": "...", "variante": "curto"|"longo"}}` para ampliar, `areas_ativas` e `tipos_ativos` para limitar o que se oferece em documento novo (os demais continuam valendo para documento antigo). Várias empresas de um mesmo grupo cabem na lista `empresas`.
 
-Depois, gere a versão de arquivo único com `--embutir-logos marca.json --saida marca_portatil.json` (o logo vira texto dentro do JSON) e entregue ao usuário dizendo para anexá-la nas próximas conversas ou deixá-la na pasta conectada. Não invente razão social, CNPJ ou cidade: o que faltar fica `[definir]`.
+**Visual da organização (opcional, `visual`)**: fontes e cores do documento, para quem tem manual de marca. Sem ele, o documento sai no visual do padrão (Arial, texto preto). Com ele: `fonte_texto` e `fonte_titulo` (nomes das famílias), `cor_texto`, `cor_titulo` (títulos, título do documento e da capa), `cor_secundaria` (código, identificação, legendas), `cor_realce` (fundo do cabeçalho de tabela e dos rótulos de quadro), e `fontes`: `[{"familia": "...", "estilo": "regular"|"negrito"|"italico"|"negrito_italico", "arquivo": "fonte.ttf"}]` — TrueType (.ttf), caminho relativo ao marca.json ou data URI; vão embutidas no .docx, então o documento abre certo em computador sem a fonte. `cor_papel`, `cor_cartao` e `cor_linha` só vestem a página do timbrador. As cores dos estados (faixa e marca d'água), a borda, as margens e as linhas das tabelas não mudam. Não invente fontes nem cores: use as do manual de marca do usuário.
+
+Depois, gere a versão de arquivo único com `--embutir-logos marca.json --saida marca_portatil.json` (o logo e as fontes do visual viram texto dentro do JSON) e entregue ao usuário dizendo para anexá-la nas próximas conversas ou deixá-la na pasta conectada. Não invente razão social, CNPJ ou cidade: o que faltar fica `[definir]`.
 
 **Regras da marca**
 
@@ -156,4 +158,4 @@ Blocos de `corpo`:
 - Ao reformatar documento existente, preserve o sentido e os dados; mudanças de conteúdo vão para o `historico` e para o resumo final.
 - No Word, se o texto for editado depois, clique com o botão direito no sumário → Atualizar campo.
 - As margens são parte do padrão: não as altere no Word (inclusive na tela de impressão, onde escolher "Estreitas" muda a seção atual).
-- O `marca.json` é a única coisa que muda entre organizações. Mudança de visual ou de regra é mudança do padrão, não da marca.
+- O `marca.json` é a única coisa que muda entre organizações. Fora o que o `visual` permite (fontes e cores de texto), mudança de visual ou de regra é mudança do padrão, não da marca.

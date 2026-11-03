@@ -77,12 +77,18 @@ público do túnel Cloudflare (configurado no painel, token no serviço
 `cloudflared`) apontando para `http://localhost:8091`; o HTTPS do túnel é o que
 deixa a página gravar direto na pasta dos documentos.
 
-**Marca padrão do site: mhdn** (30/10/2026). `pagina/marca.json` (fora do git,
-`.gitignore`) é a marca da mhdn, montada a partir do brandbook
-(claude.ai/artifact/RSANaxBgb5bQ7Rquwgbezz): logo `mhdn-horizontal-anil`
-rasterizado em PNG com resvg (o renderizador do ImageMagick desenha o M errado),
-cor `anil` #233F61, CPF, Rio Claro, política `MHDN-POL-ADM-001`, todas as áreas e
-tipos. A página busca esse arquivo ao abrir e o usa enquanto o navegador não
+**Marca padrão do site: mhdn** (atualizada em 03/11/2026). `pagina/marca.json`
+(fora do git, `.gitignore`) é a marca da mhdn, montada a partir do brandbook
+(claude.ai/artifact/RSANaxBgb5bQ7Rquwgbezz): logo = livro novo (`MHDN -logo.svg`)
++ assinatura `mhdn`, compostos nas proporções da horizontal antiga e rasterizados
+com resvg (o renderizador do ImageMagick desenha o M errado); cor `anil`
+#233F61; CPF, Rio Claro, política `MHDN-POL-ADM-001`, todas as áreas e tipos; e
+`visual` com os tokens do brandbook (tinta, anil, grafite, anil-claro; papel,
+papel-cartao e linha na página) e EB Garamond (títulos) + Newsreader (texto)
+embutidas. As fontes vieram dos woff2 do brandbook → TTF (wawoff2) com a tabela
+de nomes refeita para uma família por fonte (Regular, Italic e Bold = Garamond
+500 / Newsreader 600, peso marcado 700). Insumos e a versão anterior da marca
+estão em `saida/mhdn/` (fora do git). A página busca esse arquivo ao abrir e o usa enquanto o navegador não
 guardou uma marca própria (Editar/Importar guardam; "Usar a do site" volta). A
 mesma cópia está em `skills/timbrador/assets/marca.json` (também fora do git),
 que o gerador acha sozinho. **O `marca.json` do site é público** (tem o CPF):
@@ -92,9 +98,12 @@ sem Cloudflare Access no hostname, qualquer um o baixa.
 
 1. **O `marca.json` é a única coisa que varia entre organizações.** Sigla, nome,
    razão social, documento (CNPJ ou CPF), cidade, cor, logo, `grupo`, `ativa` —
-   mais `areas`, `areas_extra`, `areas_ativas`, `tipos_extra`, `tipos_ativos` e
-   `politica` opcionais. **Nenhum dado de empresa pode voltar para o código.**
-2. **O visual é o do original e não se negocia com o conteúdo**: faixa de
+   mais `areas`, `areas_extra`, `areas_ativas`, `tipos_extra`, `tipos_ativos`,
+   `politica` e `visual` opcionais. **Nenhum dado de empresa pode voltar para o código.**
+2. **O visual é o do original e não se negocia com o conteúdo** (exceção, decidida
+   pelo usuário em 03/11/2026: o `visual` opcional do `marca.json` troca fontes e
+   cores de texto/títulos/realce; sem ele, nada muda — e nunca muda faixa, cores de
+   estado, borda, margens nem linhas de tabela): faixa de
    estado de borda a borda e bloco de controle centralizado (código · versão ·
    Página X de Y; frase do estado; razão social · documento · cidade), rodapé com
    filete na cor da empresa e logo, borda preta a 1 cm do papel, marca d'água nos
@@ -129,6 +138,13 @@ Python embutido divergiam, **o gerador venceu nos sete pontos** (ver seção 4 d
   renderiza), bloco `figura` (vira aviso). Logo só em data URI (`--embutir-logos`).
 - Leitura, lista mestra, inventário e pastas continuam os da página original,
   com siglas genéricas (`[A-Z0-9]{2,6}`) e ficha `…timbrador:ficha`.
+- `visual` (opcional): `carregarVisual`/`lerVisual` nos dois lados; `sec()`,
+  `cor_texto()`/`corTexto()` e `realce()` devolvem o valor do original quando ele
+  não existe (sem `visual` a saída é byte a byte a de antes). Fontes embutidas:
+  `word/fontTable.xml` + `word/fonts/fontN.odttf` ofuscadas (ECMA-376 17.8.1), GUID
+  tirado do CRC32 da própria fonte, para página e gerador darem o mesmo pacote.
+  A interface também se veste com ele (cores em variáveis CSS, fontes via `FontFace`).
+  O editor da marca ainda não edita o `visual` (só preserva).
 - A marca é configurada na própria página (Marca → Configurar/Editar: organização,
   política, empresas com logo por upload, áreas e tipos ativos e extras) e fica no
   `localStorage` (`timbrador.marca`) **no formato do marca.json**, validada por
@@ -164,7 +180,12 @@ assinaturas em linhas e em tabela, e um curto e um longo pela interface
 (texto colado + formulário + Gerar) — pacote igual ao do gerador parte a parte
 e PDFs idênticos pixel a pixel no LibreOffice.
 
-**Não coberto ainda:** `--obsoletar` e a cópia obsoleta automática, inventário
+Visual (03/11/2026): regressão sem `visual` idêntica ao gerador anterior (6
+documentos); `testes/pagina.sh` com visual e fontes embutidas (DejaVu Serif do
+sistema); marca mhdn com visual igual página × gerador (25 e 28 partes); PDFs
+com Newsreader e EB Garamond embutidas (LibreOffice usa as fontes do .docx).
+
+**Não coberto ainda:** as fontes embutidas abertas no Word de verdade, `--obsoletar` e a cópia obsoleta automática, inventário
 gravando, `assinatura_formato` automático trocando para tabela, figuras JPEG grandes, tabelas que quebram entre páginas,
 apêndices com muitos níveis, documentos acima de ~30 páginas, e a aparência real
 no Word (a conferência foi toda via LibreOffice).

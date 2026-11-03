@@ -13,7 +13,7 @@ ativos, código da política) vem do marca.json; nenhum dado de organização fi
 biblioteca padrão do Python; LibreOffice (soffice, ou o comando em TIMBRADOR_SOFFICE) e pdftotext são
 opcionais e servem para numerar as páginas do sumário e gerar o PDF de conferência.
 """
-import json, re, sys, os, zipfile, shutil, subprocess, tempfile, argparse, datetime, unicodedata, base64, shlex
+import json, re, sys, os, zipfile, shutil, subprocess, tempfile, argparse, datetime, unicodedata, base64, shlex, struct
 from xml.sax.saxutils import escape
 
 EMU_CM = 360000
@@ -30,6 +30,24 @@ EMPRESA_ID = None
 EMPRESA = {}
 # Dados da organização (marca.json): nome, código da política, empresa padrão, áreas e tipos ativos.
 ORG = {"organizacao": "", "politica": "", "padrao": None, "areas_ativas": [], "tipos_ativos": []}
+# Visual opcional da organização ("visual" no marca.json): fontes e cores do documento. Sem ele, o documento
+# sai no visual do padrão original (Arial, texto preto, cinzas de apoio). As cores dos estados não mudam nunca.
+VISUAL = {}
+ESTILOS_FONTE = ("regular", "negrito", "italico", "negrito_italico")
+
+
+def sec(padrao):
+    """Cor de apoio (código, identificação, legendas): a cor_secundaria do visual, ou o cinza do original."""
+    return VISUAL.get("cor_secundaria") or padrao
+
+
+def cor_texto():
+    return VISUAL.get("cor_texto") or "000000"
+
+
+def realce():
+    """Fundo de cabeçalho de tabela e de rótulo de quadro."""
+    return VISUAL.get("cor_realce") or "F2F2F2"
 
 
 def definir_empresa(chave):
@@ -122,6 +140,19 @@ def dim_imagem(dados):
     raise ValueError("Imagem não suportada (use PNG ou JPEG)")
 
 
+def ler_fonte(ref, base):
+    """Fonte do visual: caminho (relativo ao marca.json) ou data URI base64 de uma TrueType (.ttf)."""
+    if str(ref).startswith("data:"):
+        dados = base64.b64decode(str(ref).split(",", 1)[1])
+    else:
+        caminho = ref if os.path.isabs(ref) else os.path.join(base, ref)
+        with open(caminho, "rb") as f:
+            dados = f.read()
+    if dados[:4] not in (b"\x00\x01\x00\x00", b"true"):
+        raise ValueError("não é uma fonte TrueType (.ttf)")
+    return dados
+
+
 def ler_imagem(ref, base):
     """Logo do marca.json: caminho (relativo ao marca.json) ou data URI base64 de PNG/JPEG."""
     if str(ref).startswith("data:"):
@@ -200,7 +231,41 @@ def carregar_marca(caminho):
     ORG.update(organizacao=_preenchido(cfg.get("organizacao")) or "",
                politica=_preenchido((cfg.get("politica") or {}).get("codigo")) or "", padrao=padrao)
     definir_empresa(padrao)
-    return {"logos": logos}
+    return {"logos": logos, "fontes": carregar_visual(cfg.get("visual"), base)}
+
+
+def carregar_visual(v, base):
+    """Lê o "visual" do marca.json; devolve as fontes a embutir: [(família, estilo, bytes)]."""
+    VISUAL.clear()
+    if not v:
+        return []
+    if not isinstance(v, dict):
+        raise SystemExit("marca.json: 'visual' precisa ser um objeto.")
+    for k in ("cor_texto", "cor_titulo", "cor_secundaria", "cor_realce", "cor_papel", "cor_cartao", "cor_linha"):
+        if v.get(k):
+            c = str(v[k]).lstrip("#").upper()
+            if not re.fullmatch(r"[0-9A-F]{6}", c):
+                raise SystemExit(f"marca.json: visual.{k} inválida (use hexadecimal, ex.: 1F3864).")
+            VISUAL[k] = c
+    for k in ("fonte_texto", "fonte_titulo"):
+        if _preenchido(v.get(k)):
+            if not re.fullmatch(r"[A-Za-z0-9 \-]{1,40}", str(v[k]).strip()):
+                raise SystemExit(f"marca.json: visual.{k} tem caracteres que o Word não aceita num nome de fonte.")
+            VISUAL[k] = str(v[k]).strip()
+    fontes = []
+    for f in v.get("fontes") or []:
+        fam, est = str(f.get("familia", "")).strip(), f.get("estilo")
+        if fam not in (VISUAL.get("fonte_texto"), VISUAL.get("fonte_titulo")):
+            raise SystemExit(f"marca.json: a fonte '{fam}' não é a fonte_texto nem a fonte_titulo do visual.")
+        if est not in ESTILOS_FONTE:
+            raise SystemExit(f"marca.json: estilo de fonte '{est}' inválido (use {', '.join(ESTILOS_FONTE)}).")
+        if any(x[0] == fam and x[1] == est for x in fontes):
+            raise SystemExit(f"marca.json: fonte {fam} {est} repetida.")
+        try:
+            fontes.append((fam, est, ler_fonte(f.get("arquivo", ""), base)))
+        except (OSError, ValueError) as ex:
+            raise SystemExit(f"marca.json: fonte {fam} {est} ilegível ({ex}).")
+    return fontes
 
 
 def cadastro_completo(d):
@@ -219,13 +284,16 @@ def resumo_marca():
         else:
             st = f"só minuta ou em aprovação (falta razão social/{d['documento_rotulo']})"
         linhas.append(f"  {k}: {d['marca']} · #{d['cor']} · {logo} · {st}" + ("" if d["ativa"] else " · APOSENTADA"))
+    if VISUAL:
+        linhas.append(f"  visual: texto {VISUAL.get('fonte_texto', 'Arial')} · títulos {VISUAL.get('fonte_titulo', 'Arial')}"
+                      + (f" · títulos #{VISUAL['cor_titulo']}" if VISUAL.get("cor_titulo") else ""))
     linhas.append(f"  padrão: {ORG['padrao']} · {len(ORG['areas_ativas'])} de {len(AREAS)} áreas ativas · "
                   f"{len(ORG['tipos_ativos'])} de {len(TIPOS_CURTOS) + len(TIPOS_LONGOS)} tipos ativos")
     return "\n".join(linhas)
 
 
 def embutir_logos(caminho, saida):
-    """Cópia do marca.json com os logos em data URI: um arquivo só, que também serve para a página."""
+    """Cópia do marca.json com os logos (e as fontes do visual) em data URI: um arquivo só, que também serve para a página."""
     with open(caminho, encoding="utf8") as f:
         cfg = json.load(f)
     base = os.path.dirname(os.path.abspath(caminho))
@@ -234,6 +302,10 @@ def embutir_logos(caminho, saida):
         if ref and not str(ref).startswith("data:"):
             dados = ler_imagem(ref, base)
             e["logo"] = f"data:image/{dim_imagem(dados)[2]};base64," + base64.b64encode(dados).decode()
+    for f in (cfg.get("visual") or {}).get("fontes") or []:
+        ref = f.get("arquivo")
+        if ref and not str(ref).startswith("data:"):
+            f["arquivo"] = "data:font/ttf;base64," + base64.b64encode(ler_fonte(ref, base)).decode()
     with open(saida, "w", encoding="utf8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
     return saida
@@ -407,7 +479,7 @@ def marca_dagua_vml(ctx, texto, cor):
             f'style="position:absolute;margin-left:0;margin-top:0;width:{w:.1f}pt;height:{h:.1f}pt;rotation:315;z-index:-251654144;'
             f'mso-position-horizontal:center;mso-position-horizontal-relative:page;mso-position-vertical:center;mso-position-vertical-relative:page" '
             f'o:allowincell="f" fillcolor="#{cor}" stroked="f"><v:fill opacity="1"/>'
-            f'<v:textpath style="font-family:&quot;Arial&quot;;font-size:1pt;font-weight:bold" string="{escape(texto)}"/>'
+            f'<v:textpath style="font-family:&quot;{VISUAL.get("fonte_titulo", "Arial")}&quot;;font-size:1pt;font-weight:bold" string="{escape(texto)}"/>'
             f'<w10:wrap anchorx="page" anchory="page"/></v:shape></w:pict></w:r>')
 
 
@@ -499,11 +571,11 @@ def linhas_controle(ctx, spec):
     texto = est["rodape"]
     if spec["estado"] == "OFICIAL" and spec.get("aprovado_por"):
         texto = f'Aprovado por {spec["aprovado_por"]} em {spec.get("data_aprovacao", "")}. ' + texto
-    linha1 = par(marca(ctx, spec) + run(codigo_versao(spec) + "  ·  ", sz=8, cor="404040") + pagina_x_de_y(sz=8, cor="000000", b=True),
+    linha1 = par(marca(ctx, spec) + run(codigo_versao(spec) + "  ·  ", sz=8, cor=sec("404040")) + pagina_x_de_y(sz=8, cor=cor_texto(), b=True),
                  jc="center", antes=80, depois=0, linha=240, estilo="Rodape")
-    linha2 = par(run(texto, sz=7.5, cor=est["cor"] if spec["estado"] != "OFICIAL" else "404040", b=spec["estado"] != "OFICIAL"),
+    linha2 = par(run(texto, sz=7.5, cor=est["cor"] if spec["estado"] != "OFICIAL" else sec("404040"), b=spec["estado"] != "OFICIAL"),
                  jc="center", antes=0, depois=0, linha=240, estilo="Rodape")
-    linha3 = par(run(identificacao_empresa(), sz=7.5, cor="7F7F7F"),
+    linha3 = par(run(identificacao_empresa(), sz=7.5, cor=sec("7F7F7F")),
                  jc="center", antes=0, depois=0, linha=240, estilo="Rodape",
                  borda='<w:bottom w:val="single" w:sz="4" w:space="4" w:color="BFBFBF"/>')
     return linha1 + linha2 + linha3
@@ -525,7 +597,7 @@ def rodape_reduzido(ctx, parte, ativos, spec, largura_tw):
             f'<w:tblCellMar><w:top w:w="100" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr>'
             f'<w:tblGrid><w:gridCol w:w="{c1}"/><w:gridCol w:w="{c2}"/></w:tblGrid><w:tr>'
             f'{cel(c1, par(logo, antes=0, depois=0, linha=240, estilo="Rodape"))}'
-            f'{cel(c2, par(run(titulo, sz=8, cor="404040"), jc="right", antes=0, depois=0, linha=240, estilo="Rodape"))}</w:tr></w:tbl>'
+            f'{cel(c2, par(run(titulo, sz=8, cor=sec("404040")), jc="right", antes=0, depois=0, linha=240, estilo="Rodape"))}</w:tr></w:tbl>'
             + par("", antes=0, depois=0, linha=120, estilo="Rodape"))
 
 # ----------------------------------------------------------------------------- blocos de conteúdo
@@ -603,7 +675,7 @@ def bloco_tabela(ctx, b, largura_tw, legenda=True):
             tcpr = f'<w:tcW w:w="{ws[k]}" w:type="dxa"/>'
             if cabecalho:
                 tcpr += '<w:tcBorders><w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/></w:tcBorders>'
-                tcpr += '<w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/>'
+                tcpr += f'<w:shd w:val="clear" w:color="auto" w:fill="{realce()}"/>'
             tr += (f"<w:tc><w:tcPr>{tcpr}<w:vAlign w:val=\"center\"/></w:tcPr>" +
                    par(inline(v, b=cabecalho), estilo="TabelaTexto", jc="center" if cabecalho else alinh[k]) + "</w:tc>")
         return tr + "</w:tr>"
@@ -644,7 +716,7 @@ def bloco_campos(itens, largura_tw, rotulo_cm=4.0):
            f'<w:tblCellMar><w:top w:w="30" w:type="dxa"/><w:left w:w="60" w:type="dxa"/><w:bottom w:w="30" w:type="dxa"/><w:right w:w="60" w:type="dxa"/></w:tblCellMar></w:tblPr>'
            f'<w:tblGrid><w:gridCol w:w="{c1}"/><w:gridCol w:w="{c2}"/></w:tblGrid>')
     for rot, val in itens:
-        tbl += (f'<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="{c1}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr>'
+        tbl += (f'<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="{c1}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="{realce()}"/></w:tcPr>'
                 f'{par(run(rot, b=True, sz=10), estilo="TabelaTexto")}</w:tc>'
                 f'<w:tc><w:tcPr><w:tcW w:w="{c2}" w:type="dxa"/></w:tcPr>{par(inline(val, sz=10), estilo="TabelaTexto")}</w:tc></w:tr>')
     return tbl + "</w:tbl>" + par("", antes=0, depois=0, linha=240, estilo="TabelaTexto")
@@ -683,7 +755,7 @@ def bloco_assinaturas_tabela(ass, largura_tw):
     borda = "<w:tblBorders>" + "".join(f'<w:{l} w:val="single" w:sz="4" w:space="0" w:color="000000"/>'
                                        for l in ("top", "left", "bottom", "right", "insideH", "insideV")) + "</w:tblBorders>"
     def cel(w, c, cab=False):
-        sombra = '<w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/>' if cab else ""
+        sombra = f'<w:shd w:val="clear" w:color="auto" w:fill="{realce()}"/>' if cab else ""
         return f'<w:tc><w:tcPr><w:tcW w:w="{w}" w:type="dxa"/>{sombra}<w:vAlign w:val="center"/></w:tcPr>{c}</w:tc>'
     t = (f'<w:tbl><w:tblPr><w:tblW w:w="{largura_tw}" w:type="dxa"/>{borda}<w:tblLayout w:type="fixed"/>'
          f'<w:tblCellMar><w:left w:w="85" w:type="dxa"/><w:right w:w="85" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>{grade(ws)}</w:tblGrid>'
@@ -837,25 +909,29 @@ def estilos_xml():
         n = f'<w:next w:val="{prox}"/>' if prox else ""
         return (f'<w:style w:type="{tipo}" w:styleId="{id_}"><w:name w:val="{nome}"/>{b}{n}{extra}<w:qFormat/>'
                 f"<w:pPr>{ppr}</w:pPr><w:rPr>{rpr_}</w:rPr></w:style>")
-    f = '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Arial" w:cs="Arial"/>'
+    fonte = lambda n: f'<w:rFonts w:ascii="{n}" w:hAnsi="{n}" w:eastAsia="{n}" w:cs="{n}"/>'
+    f = fonte(VISUAL.get("fonte_texto", "Arial"))
+    # títulos: fonte e cor próprias só quando o visual as define (sem visual, nada muda)
+    tf = fonte(VISUAL["fonte_titulo"]) if VISUAL.get("fonte_titulo") else ""
+    tc = f'<w:color w:val="{VISUAL["cor_titulo"]}"/>' if VISUAL.get("cor_titulo") else ""
     s = (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles {NS}>'
          f'<w:docDefaults><w:rPrDefault><w:rPr>{f}<w:sz w:val="24"/><w:szCs w:val="24"/><w:lang w:val="pt-BR" w:eastAsia="pt-BR" w:bidi="ar-SA"/></w:rPr></w:rPrDefault>'
          f'<w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="360" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>')
     s += ('<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/>'
           '<w:pPr><w:widowControl/><w:spacing w:after="120" w:line="360" w:lineRule="auto"/><w:ind w:firstLine="709"/><w:jc w:val="both"/></w:pPr>'
-          '<w:rPr><w:color w:val="000000"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:style>')
+          f'<w:rPr><w:color w:val="{cor_texto()}"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:style>')
     s += est("SemRecuo", "Texto sem recuo", '<w:ind w:firstLine="0"/>')
     tit = '<w:keepNext/><w:keepLines/><w:spacing w:before="360" w:after="240" w:line="360" w:lineRule="auto"/><w:ind w:left="0" w:firstLine="0"/><w:jc w:val="left"/>'
-    s += est("Heading1", "heading 1", tit + '<w:outlineLvl w:val="0"/>', "<w:b/><w:bCs/><w:caps/>", prox="Normal")
-    s += est("Heading2", "heading 2", tit + '<w:outlineLvl w:val="1"/>', "<w:caps/>", prox="Normal")
-    s += est("Heading3", "heading 3", tit + '<w:outlineLvl w:val="2"/>', "<w:b/><w:bCs/>", prox="Normal")
-    s += est("Heading4", "heading 4", tit + '<w:outlineLvl w:val="3"/>', "<w:b/><w:i/>", prox="Normal")
-    s += est("Heading5", "heading 5", tit + '<w:outlineLvl w:val="4"/>', "<w:i/>", prox="Normal")
+    s += est("Heading1", "heading 1", tit + '<w:outlineLvl w:val="0"/>', tf + "<w:b/><w:bCs/><w:caps/>" + tc, prox="Normal")
+    s += est("Heading2", "heading 2", tit + '<w:outlineLvl w:val="1"/>', tf + "<w:caps/>" + tc, prox="Normal")
+    s += est("Heading3", "heading 3", tit + '<w:outlineLvl w:val="2"/>', tf + "<w:b/><w:bCs/>" + tc, prox="Normal")
+    s += est("Heading4", "heading 4", tit + '<w:outlineLvl w:val="3"/>', tf + "<w:b/><w:i/>" + tc, prox="Normal")
+    s += est("Heading5", "heading 5", tit + '<w:outlineLvl w:val="4"/>', tf + "<w:i/>" + tc, prox="Normal")
     centro = '<w:keepNext/><w:spacing w:before="0" w:after="360" w:line="360" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/>'
-    s += est("TituloSemNumero", "Título sem indicativo numérico", centro + '<w:outlineLvl w:val="0"/>', "<w:b/><w:bCs/><w:caps/>", prox="Normal")
-    s += est("TituloSumario", "Título do sumário", centro, "<w:b/><w:bCs/><w:caps/>", prox="Normal")
+    s += est("TituloSemNumero", "Título sem indicativo numérico", centro + '<w:outlineLvl w:val="0"/>', tf + "<w:b/><w:bCs/><w:caps/>" + tc, prox="Normal")
+    s += est("TituloSumario", "Título do sumário", centro, tf + "<w:b/><w:bCs/><w:caps/>" + tc, prox="Normal")
     s += est("TituloDocumento", "Título do documento", '<w:keepNext/><w:spacing w:before="0" w:after="60" w:line="276" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/>',
-             '<w:b/><w:bCs/><w:caps/><w:sz w:val="26"/><w:szCs w:val="26"/>')
+             tf + '<w:b/><w:bCs/><w:caps/>' + tc + '<w:sz w:val="26"/><w:szCs w:val="26"/>')
     peq = '<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/>'
     s += est("Legenda", "caption", '<w:keepNext/><w:spacing w:before="240" w:after="60" w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/>', '<w:sz w:val="20"/><w:szCs w:val="20"/>')
     s += est("Fonte", "Fonte de ilustração", '<w:spacing w:before="60" w:after="240" w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="left"/>', '<w:sz w:val="20"/><w:szCs w:val="20"/>')
@@ -879,7 +955,7 @@ def numeracao_xml(ctx):
     a = [
         (1, nivel(0, "lowerLetter", "%1)", 1134, 425) + nivel(1, "bullet", "–", 1560, 426) + nivel(2, "bullet", "–", 1985, 425)),
         (2, nivel(0, "decimal", "%1.", 1134, 425) + nivel(1, "lowerLetter", "%2)", 1560, 426) + nivel(2, "bullet", "–", 1985, 425)),
-        (3, nivel(0, "bullet", "•", 1134, 425, "Arial") + nivel(1, "bullet", "–", 1560, 426) + nivel(2, "bullet", "–", 1985, 425)),
+        (3, nivel(0, "bullet", "•", 1134, 425, VISUAL.get("fonte_texto", "Arial")) + nivel(1, "bullet", "–", 1560, 426) + nivel(2, "bullet", "–", 1985, 425)),
         (4, nivel(0, "bullet", "☐", 1134, 425, "Segoe UI Symbol") + nivel(1, "bullet", "☐", 1560, 426, "Segoe UI Symbol") + nivel(2, "bullet", "–", 1985, 425)),
     ]
     s = f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering {NS}>'
@@ -890,10 +966,11 @@ def numeracao_xml(ctx):
     return s + "</w:numbering>"
 
 
-def settings_xml(atualizar):
+def settings_xml(atualizar, embutir=False):
     u = '<w:updateFields w:val="true"/>' if atualizar else ""
+    e = "<w:embedTrueTypeFonts/>" if embutir else ""
     return (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings {NS}>'
-            f'<w:defaultTabStop w:val="709"/><w:hyphenationZone w:val="425"/><w:characterSpacingControl w:val="doNotCompress"/>{u}'
+            f'{e}<w:defaultTabStop w:val="709"/><w:hyphenationZone w:val="425"/><w:characterSpacingControl w:val="doNotCompress"/>{u}'
             '<w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat>'
             '<w:themeFontLang w:val="pt-BR"/><w:decimalSymbol w:val=","/><w:listSeparator w:val=";"/></w:settings>')
 
@@ -998,7 +1075,7 @@ def montar(spec, ativos, paginas_sumario=None):
 
     if not longo:
         corpo += par(run(tipo_nome.upper() + (f' – {spec["titulo"]}' if spec.get("titulo") else ""), b=True), estilo="TituloDocumento")
-        corpo += par(run(f'{spec["codigo"]}  ·  Versão {spec["versao"]}  ·  Emissão {spec["data_emissao"]}  ·  ', sz=9, cor="404040") +
+        corpo += par(run(f'{spec["codigo"]}  ·  Versão {spec["versao"]}  ·  Emissão {spec["data_emissao"]}  ·  ', sz=9, cor=sec("404040")) +
                      run(est["rotulo"].upper(), sz=9, b=True, cor=est["cor"]), jc="center", antes=0, depois=240, linha=240, estilo="SemRecuo")
         if spec.get("identificacao"):
             ident = spec["identificacao"]   # empresa e documento já estão no cabeçalho
@@ -1012,9 +1089,10 @@ def montar(spec, ativos, paginas_sumario=None):
             return (f'<w:tr><w:trPr><w:trHeight w:val="{int(h_cm * TW_CM)}" w:hRule="exact"/></w:trPr><w:tc><w:tcPr><w:tcW w:w="{larg_t}" w:type="dxa"/>'
                     f'<w:vAlign w:val="{va}"/></w:tcPr>{conteudo}</w:tc></w:tr>')
         cp = lambda x, **k: par(x, jc="center", antes=k.get("antes", 0), depois=k.get("depois", 0), linha=k.get("linha", 276), estilo="SemRecuo")
-        meio = (cp(run(tipo_nome.upper(), sz=12, cor=EMPRESA["cor"], b=True, esp=40), depois=240) +
-                cp(run(spec["titulo"].upper(), b=True, sz=22), linha=300, depois=200) +
-                (cp(run(spec["subtitulo"], sz=14, cor="262626"), depois=480) if spec.get("subtitulo") else cp("", depois=480)))
+        ft = VISUAL.get("fonte_titulo")
+        meio = (cp(run(tipo_nome.upper(), sz=12, cor=EMPRESA["cor"], b=True, esp=40, fonte=ft), depois=240) +
+                cp(run(spec["titulo"].upper(), b=True, sz=22, fonte=ft, cor=VISUAL.get("cor_titulo")), linha=300, depois=200) +
+                (cp(run(spec["subtitulo"], sz=14, cor=sec("262626")), depois=480) if spec.get("subtitulo") else cp("", depois=480)))
         ctab = [["Código", spec["codigo"]], ["Versão", spec["versao"]], ["Estado", est["rotulo"].upper()], ["Classificação", spec["classificacao"]]]
         wqs = [int(larg_t * p / 4.6) for p in (1.6, 1, 1, 1)]
         quadro = (f'<w:tbl><w:tblPr><w:tblW w:w="{sum(wqs)}" w:type="dxa"/><w:jc w:val="center"/>'
@@ -1022,9 +1100,9 @@ def montar(spec, ativos, paginas_sumario=None):
                   '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/></w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr>'
                   f'<w:tblGrid>{grade(wqs)}</w:tblGrid><w:tr>')
         for (rot, val), wq in zip(ctab, wqs):
-            cor = est["cor"] if rot == "Estado" else "000000"
+            cor = est["cor"] if rot == "Estado" else cor_texto()
             quadro += (f'<w:tc><w:tcPr><w:tcW w:w="{wq}" w:type="dxa"/></w:tcPr>'
-                       f'{par(run(rot.upper(), sz=7, cor="595959", esp=10), jc="center", estilo="TabelaTexto", antes=60)}'
+                       f'{par(run(rot.upper(), sz=7, cor=sec("595959"), esp=10), jc="center", estilo="TabelaTexto", antes=60)}'
                        f'{par(run(val, b=True, sz=9.5, cor=cor), jc="center", estilo="TabelaTexto", depois=60)}</w:tc>')
         quadro += "</w:tr></w:tbl>"
         ano = spec["data_emissao"][-4:]
@@ -1113,7 +1191,48 @@ TIPOS_REL = {"image": "http://schemas.openxmlformats.org/officeDocument/2006/rel
              "styles": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles",
              "numbering": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering",
              "settings": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings",
-             "customXml": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml"}
+             "customXml": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml",
+             "fontTable": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable",
+             "font": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/font"}
+
+
+def chave_fonte(dados):
+    """GUID da fonte embutida, tirado do próprio arquivo (o mesmo arquivo dá o mesmo documento)."""
+    import zlib
+    b = b"".join(struct.pack(">I", zlib.crc32(bytes([k]) + dados)) for k in range(4))
+    h = b.hex().upper()
+    return "{%s-%s-%s-%s-%s}" % (h[:8], h[8:12], h[12:16], h[16:20], h[20:])
+
+
+def ofuscar_fonte(dados, chave):
+    """Fonte embutida do Word (ECMA-376, 17.8.1): os 32 primeiros bytes em XOR com a chave, bytes ao contrário."""
+    k = bytes.fromhex(chave.strip("{}").replace("-", ""))[::-1]
+    d = bytearray(dados)
+    for i in range(32):
+        d[i] ^= k[i % 16]
+    return bytes(d)
+
+
+def partes_fontes(ctx, fontes):
+    """fontTable.xml e as fontes ofuscadas (word/fonts/fontN.odttf), na ordem do visual: texto, depois títulos."""
+    if not fontes:
+        return None, []
+    tag = {"regular": "embedRegular", "negrito": "embedBold", "italico": "embedItalic", "negrito_italico": "embedBoldItalic"}
+    familias = [f for f in (VISUAL.get("fonte_texto"), VISUAL.get("fonte_titulo")) if f]
+    familias = [f for i, f in enumerate(familias) if f not in familias[:i]]
+    xml, arquivos = "", []
+    for fam in familias:
+        emb = ""
+        for est in ESTILOS_FONTE:
+            dados = next((d for f, e, d in fontes if f == fam and e == est), None)
+            if dados is None:
+                continue
+            nome = f"font{len(arquivos) + 1}.odttf"; chave = chave_fonte(dados)
+            rid = ctx.rel("word/fontTable.xml", "font", f"fonts/{nome}")
+            emb += f'<w:{tag[est]} r:id="{rid}" w:fontKey="{chave}"/>'
+            arquivos.append((f"word/fonts/{nome}", ofuscar_fonte(dados, chave)))
+        xml += f'<w:font w:name="{escape(fam)}"><w:charset w:val="00"/><w:family w:val="roman"/><w:pitch w:val="variable"/>{emb}</w:font>'
+    return f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:fonts {NS}>{xml}</w:fonts>', arquivos
 
 
 VERSAO_TIMBRADOR = "2026-09-16"
@@ -1160,6 +1279,9 @@ def partes_ficha(spec):
 def gravar(spec, ativos, saida, paginas_sumario=None, atualizar_campos=False):
     ctx, documento, extras = montar(spec, ativos, paginas_sumario)
     ctx.rel("word/document.xml", "customXml", "../customXml/item1.xml")
+    tabela_fontes, fontes_ofuscadas = partes_fontes(ctx, ativos.get("fontes"))
+    if tabela_fontes:
+        ctx.rel("word/document.xml", "fontTable", "fontTable.xml")
     item_ficha, props_ficha, custom_props = partes_ficha(spec)
     agora = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     est = ESTADOS[spec["estado"]]
@@ -1171,6 +1293,9 @@ def gravar(spec, ativos, saida, paginas_sumario=None, atualizar_campos=False):
                    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
                    '<Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/>'
                    '<Default Extension="jpeg" ContentType="image/jpeg"/>'
+                   + ('<Default Extension="odttf" ContentType="application/vnd.openxmlformats-officedocument.obfuscatedFont"/>'
+                      '<Override PartName="/word/fontTable.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"/>'
+                      if tabela_fontes else "") +
                    '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
                    '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
                    '<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>'
@@ -1208,7 +1333,11 @@ def gravar(spec, ativos, saida, paginas_sumario=None, atualizar_campos=False):
         z.writestr("word/document.xml", documento)
         z.writestr("word/styles.xml", estilos_xml())
         z.writestr("word/numbering.xml", numeracao_xml(ctx))
-        z.writestr("word/settings.xml", settings_xml(atualizar_campos))
+        z.writestr("word/settings.xml", settings_xml(atualizar_campos, bool(tabela_fontes)))
+        if tabela_fontes:
+            z.writestr("word/fontTable.xml", tabela_fontes)
+            for nome, dados in fontes_ofuscadas:
+                z.writestr(nome, dados)
         for parte, (t, conteudo) in extras.items():
             raiz = "hdr" if t == "hdr" else "ftr"
             z.writestr(parte, f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:{raiz} {NS}>{conteudo}</w:{raiz}>')

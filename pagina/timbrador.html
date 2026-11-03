@@ -5,18 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Timbrador</title>
 <style>
-  :root { --cor:#1F3864; --tinta:#1d1d1f; --suave:#6b6b70; --linha:#dcdcdf; --fundo:#f5f5f7; --erro:#B00020; --ok:#1E7B3C; }
+  /* As cores e fontes da interface vêm do "visual" do marca.json (aplicarMarca); estes são os valores sem visual. */
+  :root { --cor:#1F3864; --tinta:#1d1d1f; --suave:#6b6b70; --linha:#dcdcdf; --fundo:#f5f5f7; --cartao:#fff; --erro:#B00020; --ok:#1E7B3C;
+    --fonte-texto:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; --fonte-titulo:var(--fonte-texto); }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--fundo); color:var(--tinta); font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; }
+  body { margin:0; background:var(--fundo); color:var(--tinta); font:16px/1.5 var(--fonte-texto); }
   main { max-width:560px; margin:40px auto; padding:0 16px; }
-  .cartao { background:#fff; border:1px solid var(--linha); border-radius:14px; padding:28px; }
+  .cartao { background:var(--cartao); border:1px solid var(--linha); border-radius:14px; padding:28px; }
   header { text-align:center; margin-bottom:22px; }
   header img { height:58px; }
   h1 { font-size:20px; margin:10px 0 2px; }
+  h1, #editor-marca h2, #editor-marca h3 { font-family:var(--fonte-titulo); color:var(--cor); }
+  body.com-visual h1 { font-size:26px; font-weight:500; }
+  body.com-visual #editor-marca h2 { font-size:22px; font-weight:500; }
+  body.com-visual #editor-marca h3 { font-size:19px; font-weight:500; }
   header p { margin:0; color:var(--suave); font-size:14px; }
   label { display:block; font-weight:600; font-size:14px; margin:18px 0 6px; }
   .dica { font-weight:400; color:var(--suave); font-size:13px; margin-top:4px; }
-  select, input[type=text], input[type=date], input[type=number] { width:100%; padding:10px 12px; font:inherit; border:1px solid var(--linha); border-radius:8px; background:#fff; color:inherit; }
+  select, input[type=text], input[type=date], input[type=number] { width:100%; padding:10px 12px; font:inherit; border:1px solid var(--linha); border-radius:8px; background:var(--cartao); color:inherit; }
   select:focus, input:focus { outline:2px solid var(--cor); outline-offset:1px; }
   .soltar { border:2px dashed var(--linha); border-radius:12px; padding:26px 16px; text-align:center; cursor:pointer; transition:border-color .15s, background .15s; }
   .soltar:hover, .soltar.ativo { border-color:var(--cor); background:color-mix(in srgb, var(--cor) 6%, #fff); }
@@ -49,7 +55,7 @@
   .lista.ligada #lista-estado { color:var(--ok); font-weight:600; }
   .lista .dica { margin-top:4px; }
   .lista .botoes { display:flex; gap:6px; }
-  button.acao { width:auto; margin:0; padding:6px 12px; font-size:13px; font-weight:600; color:var(--cor); background:#fff; border:1px solid var(--linha); border-radius:8px; white-space:nowrap; }
+  button.acao { width:auto; margin:0; padding:6px 12px; font-size:13px; font-weight:600; color:var(--cor); background:var(--cartao); border:1px solid var(--linha); border-radius:8px; white-space:nowrap; }
   button.acao:hover { border-color:var(--cor); }
   .atualizacao { margin-top:14px; padding:12px 14px; border-left:3px solid #1F5FA8; background:#f1f5fb; border-radius:0 8px 8px 0; font-size:14px; }
   .atualizacao label { margin-top:12px; }
@@ -288,6 +294,15 @@ let EMP_ID = null, EMPRESA = {};
 // Dados da organização (marca.json): nome, código da política, empresa padrão, áreas e tipos ativos.
 const ORG = { organizacao: "", politica: "", padrao: null, areas_ativas: [], tipos_ativos: [] };
 let MARCA_CARREGADA = false;
+// Visual opcional da organização ("visual" no marca.json): fontes e cores do documento. Sem ele, o documento
+// sai no visual do padrão original (Arial, texto preto, cinzas de apoio). As cores dos estados não mudam nunca.
+const VISUAL = {};
+const FONTES = [];   // [família, estilo, bytes] a embutir no .docx
+const ESTILOS_FONTE = ["regular", "negrito", "italico", "negrito_italico"];
+// Cor de apoio (código, identificação, legendas): a cor_secundaria do visual, ou o cinza do original.
+const sec = padrao => VISUAL.cor_secundaria || padrao;
+const corTexto = () => VISUAL.cor_texto || "000000";
+const realce = () => VISUAL.cor_realce || "F2F2F2";   // fundo de cabeçalho de tabela e de rótulo de quadro
 
 function definirEmpresa(chave) {
   if (!(chave in EMPRESAS)) throw new Error(`Empresa desconhecida: ${chave}. Use uma de: ${Object.keys(EMPRESAS).join(", ")}.`);
@@ -375,6 +390,42 @@ function lerLogo(ref, sig) {
   const [w, h, ext] = dimImagem(dados);
   return { dados, w, h, ext, uri: `data:image/${ext};base64,${s.split(",", 2)[1]}` };
 }
+function lerFonte(ref, rotulo) {
+  const s = String(ref || "");
+  if (!s.startsWith("data:"))
+    throw new Error(`a fonte ${rotulo} é um caminho de arquivo, que a página não consegue abrir. Gere uma versão com tudo embutido: ` +
+      "python3 gerar_documento.py --embutir-logos marca.json --saida marca_portatil.json");
+  const bin = atob(s.split(",", 2)[1] || ""), d = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) d[i] = bin.charCodeAt(i);
+  const ttf = (d[0] === 0 && d[1] === 1 && d[2] === 0 && d[3] === 0) || String.fromCharCode(d[0], d[1], d[2], d[3]) === "true";
+  if (!ttf) throw new Error("não é uma fonte TrueType (.ttf)");
+  return d;
+}
+// Lê o "visual" do marca.json (mesmas regras do gerador); devolve o visual e as fontes sem mexer no estado.
+function lerVisual(v) {
+  const vis = {}, fontes = [];
+  if (!v) return { vis, fontes };
+  if (typeof v !== "object" || Array.isArray(v)) erroMarca("'visual' precisa ser um objeto.");
+  for (const k of ["cor_texto", "cor_titulo", "cor_secundaria", "cor_realce", "cor_papel", "cor_cartao", "cor_linha"]) {
+    if (!v[k]) continue;
+    const c = String(v[k]).replace(/^#+/, "").toUpperCase();
+    if (!/^[0-9A-F]{6}$/.test(c)) erroMarca(`visual.${k} inválida (use hexadecimal, ex.: 1F3864).`);
+    vis[k] = c;
+  }
+  for (const k of ["fonte_texto", "fonte_titulo"]) {
+    if (!preenchido(v[k])) continue;
+    if (!/^[A-Za-z0-9 \-]{1,40}$/.test(String(v[k]).trim())) erroMarca(`visual.${k} tem caracteres que o Word não aceita num nome de fonte.`);
+    vis[k] = String(v[k]).trim();
+  }
+  for (const f of v.fontes || []) {
+    const fam = String(f.familia || "").trim(), est = f.estilo;
+    if (fam !== vis.fonte_texto && fam !== vis.fonte_titulo) erroMarca(`a fonte '${fam}' não é a fonte_texto nem a fonte_titulo do visual.`);
+    if (!ESTILOS_FONTE.includes(est)) erroMarca(`estilo de fonte '${est}' inválido (use ${ESTILOS_FONTE.join(", ")}).`);
+    if (fontes.some(x => x[0] === fam && x[1] === est)) erroMarca(`fonte ${fam} ${est} repetida.`);
+    try { fontes.push([fam, est, lerFonte(f.arquivo, `${fam} ${est}`)]); } catch (ex) { erroMarca(`fonte ${fam} ${est} ilegível (${ex.message}).`); }
+  }
+  return { vis, fontes };
+}
 // Campo do cadastro: vazio ou [definir] vale como não informado.
 const preenchido = v => v === undefined || v === null || ["", INDEFINIDO].includes(String(v).trim()) ? null : String(v).trim();
 const erroMarca = msg => { throw new Error("marca.json: " + msg); };
@@ -421,9 +472,11 @@ function carregarMarca(entrada) {
   }
   const padrao = String(cfg.empresa_padrao || ativas[0]).toUpperCase();
   if (!(padrao in novas)) erroMarca(`empresa_padrao ${padrao} não está em 'empresas'.`);
+  const visual = lerVisual(cfg.visual);
   // tudo validado: só agora troca o cadastro em uso
   const trocar = (alvo, origem) => { for (const k of Object.keys(alvo)) delete alvo[k]; Object.assign(alvo, origem); };
   trocar(EMPRESAS, novas); trocar(LOGOS, logos); trocar(AREAS, areas); trocar(TIPOS_CURTOS, curtos); trocar(TIPOS_LONGOS, longos);
+  trocar(VISUAL, visual.vis); FONTES.splice(0, FONTES.length, ...visual.fontes);
   EMPRESAS_ATIVAS.splice(0, EMPRESAS_ATIVAS.length, ...ativas);
   EMPRESAS_DO_GRUPO.splice(0, EMPRESAS_DO_GRUPO.length, ...ativas.filter(k => !novas[k].grupo));
   Object.assign(ORG, org, { organizacao: preenchido(cfg.organizacao) || "", politica: preenchido((cfg.politica || {}).codigo) || "",
@@ -523,7 +576,7 @@ function marcaDagua(ctx, texto, cor) {
   return `<w:r><w:rPr><w:noProof/></w:rPr><w:pict>${SHAPETYPE_136}<v:shape id="PowerPlusWaterMarkObject${idn}" o:spid="_x0000_s${2000 + idn}" type="#_x0000_t136" ` +
     `style="position:absolute;margin-left:0;margin-top:0;width:${w.toFixed(1)}pt;height:${h.toFixed(1)}pt;rotation:315;z-index:-251654144;` +
     `mso-position-horizontal:center;mso-position-horizontal-relative:page;mso-position-vertical:center;mso-position-vertical-relative:page" ` +
-    `o:allowincell="f" fillcolor="#${cor}" stroked="f"><v:fill opacity="1"/><v:textpath style="font-family:&quot;Arial&quot;;font-size:1pt;font-weight:bold" string="${esc(texto)}"/>` +
+    `o:allowincell="f" fillcolor="#${cor}" stroked="f"><v:fill opacity="1"/><v:textpath style="font-family:&quot;${VISUAL.fonte_titulo || "Arial"}&quot;;font-size:1pt;font-weight:bold" string="${esc(texto)}"/>` +
     `<w10:wrap anchorx="page" anchory="page"/></v:shape></w:pict></w:r>`;
 }
 function textoTarja(spec) {
@@ -574,9 +627,9 @@ function linhasControle(ctx, spec) {
   if (spec.estado === "OFICIAL" && spec.aprovado_por) texto = `Aprovado por ${spec.aprovado_por} em ${spec.data_aprovacao || ""}. ` + texto;
   const o = { jc: "center", antes: 0, depois: 0, linha: 240, estilo: "Rodape" };
   const oficial = spec.estado === "OFICIAL";
-  return par(marca(ctx, spec) + run(codigoVersao(spec) + "  ·  ", { sz: 8, cor: "404040" }) + paginaXdeY({ sz: 8, cor: "000000", b: true }), { ...o, antes: 80 }) +
-    par(run(texto, { sz: 7.5, cor: oficial ? "404040" : est.cor, b: !oficial }), o) +
-    par(run(identificacaoEmpresa(), { sz: 7.5, cor: "7F7F7F" }), { ...o, borda: '<w:bottom w:val="single" w:sz="4" w:space="4" w:color="BFBFBF"/>' });
+  return par(marca(ctx, spec) + run(codigoVersao(spec) + "  ·  ", { sz: 8, cor: sec("404040") }) + paginaXdeY({ sz: 8, cor: corTexto(), b: true }), { ...o, antes: 80 }) +
+    par(run(texto, { sz: 7.5, cor: oficial ? sec("404040") : est.cor, b: !oficial }), o) +
+    par(run(identificacaoEmpresa(), { sz: 7.5, cor: sec("7F7F7F") }), { ...o, borda: '<w:bottom w:val="single" w:sz="4" w:space="4" w:color="BFBFBF"/>' });
 }
 // Rodapé das páginas internas do documento longo: filete na cor da empresa, logo à esquerda e título (curto) à direita.
 function rodapeReduzido(ctx, parte, spec, larg) {
@@ -586,7 +639,7 @@ function rodapeReduzido(ctx, parte, spec, larg) {
   return `<w:tbl><w:tblPr><w:tblW w:w="${larg}" w:type="dxa"/><w:tblBorders><w:top w:val="single" w:sz="12" w:space="0" w:color="${EMPRESA.cor}"/></w:tblBorders><w:tblLayout w:type="fixed"/>` +
     `<w:tblCellMar><w:top w:w="100" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${grade([c1, c2])}</w:tblGrid><w:tr>` +
     cel(c1, par(logo, { antes: 0, depois: 0, linha: 240, estilo: "Rodape" })) +
-    cel(c2, par(run(spec.titulo_curto || spec.titulo, { sz: 8, cor: "404040" }), { jc: "right", antes: 0, depois: 0, linha: 240, estilo: "Rodape" })) + "</w:tr></w:tbl>" +
+    cel(c2, par(run(spec.titulo_curto || spec.titulo, { sz: 8, cor: sec("404040") }), { jc: "right", antes: 0, depois: 0, linha: 240, estilo: "Rodape" })) + "</w:tr></w:tbl>" +
     par("", { antes: 0, depois: 0, linha: 120, estilo: "Rodape" });
 }
 
@@ -644,7 +697,7 @@ function blocoTabela(ctx, b, larg, legenda = true) {
     let tr = `<w:tr><w:trPr><w:cantSplit/>${c ? "<w:tblHeader/>" : ""}</w:trPr>`;
     for (let k = 0; k < ncol; k++) {
       let tcpr = `<w:tcW w:w="${ws[k]}" w:type="dxa"/>`;
-      if (c) tcpr += '<w:tcBorders><w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/></w:tcBorders><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/>';
+      if (c) tcpr += `<w:tcBorders><w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/></w:tcBorders><w:shd w:val="clear" w:color="auto" w:fill="${realce()}"/>`;
       tr += `<w:tc><w:tcPr>${tcpr}<w:vAlign w:val="center"/></w:tcPr>${par(inline(k < vals.length ? vals[k] : "", { b: c }), { estilo: "TabelaTexto", jc: c ? "center" : (alinh[k] || "left") })}</w:tc>`;
     }
     return tr + "</w:tr>";
@@ -664,7 +717,7 @@ function blocoCampos(itens, larg, rotuloCm = 4.0) {
     `<w:tblCellMar><w:top w:w="30" w:type="dxa"/><w:left w:w="60" w:type="dxa"/><w:bottom w:w="30" w:type="dxa"/><w:right w:w="60" w:type="dxa"/></w:tblCellMar></w:tblPr>` +
     `<w:tblGrid>${grade([c1, c2])}</w:tblGrid>`;
   for (const [rot, val] of itens)
-    tbl += `<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="${c1}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/></w:tcPr>${par(run(rot, { b: true, sz: 10 }), { estilo: "TabelaTexto" })}</w:tc>` +
+    tbl += `<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="${c1}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${realce()}"/></w:tcPr>${par(run(rot, { b: true, sz: 10 }), { estilo: "TabelaTexto" })}</w:tc>` +
       `<w:tc><w:tcPr><w:tcW w:w="${c2}" w:type="dxa"/></w:tcPr>${par(inline(val, { sz: 10 }), { estilo: "TabelaTexto" })}</w:tc></w:tr>`;
   return tbl + "</w:tbl>" + par("", { antes: 0, depois: 0, linha: 240, estilo: "TabelaTexto" });
 }
@@ -694,7 +747,7 @@ function blocoAssinaturasTabela(ass, larg) {
   const ws = [0.3, 0.18, 0.14, 0.26].map(x => I(larg * x));
   ws.push(larg - ws.reduce((a, b) => a + b, 0));
   const borda = "<w:tblBorders>" + ["top", "left", "bottom", "right", "insideH", "insideV"].map(l => `<w:${l} w:val="single" w:sz="4" w:space="0" w:color="000000"/>`).join("") + "</w:tblBorders>";
-  const cel = (w, c, cab) => `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${cab ? '<w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/>' : ""}<w:vAlign w:val="center"/></w:tcPr>${c}</w:tc>`;
+  const cel = (w, c, cab) => `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${cab ? `<w:shd w:val="clear" w:color="auto" w:fill="${realce()}"/>` : ""}<w:vAlign w:val="center"/></w:tcPr>${c}</w:tc>`;
   let t = `<w:tbl><w:tblPr><w:tblW w:w="${larg}" w:type="dxa"/>${borda}<w:tblLayout w:type="fixed"/>` +
     `<w:tblCellMar><w:left w:w="85" w:type="dxa"/><w:right w:w="85" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${grade(ws)}</w:tblGrid>` +
     `<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>` + CAB_ASSINATURAS.map((c, i) => cel(ws[i], par(run(c, { b: true, sz: 10 }), { jc: "center", estilo: "TabelaTexto" }), true)).join("") + "</w:tr>";
@@ -871,19 +924,22 @@ function blocos(ctx, lista, parte, larg, longo) {
 function estilosXml() {
   const est = (id, nome, ppr = "", r = "", prox) =>
     `<w:style w:type="paragraph" w:styleId="${id}"><w:name w:val="${nome}"/><w:basedOn w:val="Normal"/>${prox ? `<w:next w:val="${prox}"/>` : ""}<w:qFormat/><w:pPr>${ppr}</w:pPr><w:rPr>${r}</w:rPr></w:style>`;
+  const fonte = n => `<w:rFonts w:ascii="${n}" w:hAnsi="${n}" w:eastAsia="${n}" w:cs="${n}"/>`;
+  // títulos: fonte e cor próprias só quando o visual as define (sem visual, nada muda)
+  const tf = VISUAL.fonte_titulo ? fonte(VISUAL.fonte_titulo) : "", tc = VISUAL.cor_titulo ? `<w:color w:val="${VISUAL.cor_titulo}"/>` : "";
   let s = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${NS}>` +
-    '<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Arial" w:cs="Arial"/><w:sz w:val="24"/><w:szCs w:val="24"/><w:lang w:val="pt-BR" w:eastAsia="pt-BR" w:bidi="ar-SA"/></w:rPr></w:rPrDefault>' +
+    `<w:docDefaults><w:rPrDefault><w:rPr>${fonte(VISUAL.fonte_texto || "Arial")}<w:sz w:val="24"/><w:szCs w:val="24"/><w:lang w:val="pt-BR" w:eastAsia="pt-BR" w:bidi="ar-SA"/></w:rPr></w:rPrDefault>` +
     '<w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="360" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' +
     '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/><w:pPr><w:widowControl/><w:spacing w:after="120" w:line="360" w:lineRule="auto"/><w:ind w:firstLine="709"/><w:jc w:val="both"/></w:pPr>' +
-    '<w:rPr><w:color w:val="000000"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:style>';
+    `<w:rPr><w:color w:val="${corTexto()}"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:style>`;
   s += est("SemRecuo", "Texto sem recuo", '<w:ind w:firstLine="0"/>');
   const tit = '<w:keepNext/><w:keepLines/><w:spacing w:before="360" w:after="240" w:line="360" w:lineRule="auto"/><w:ind w:left="0" w:firstLine="0"/><w:jc w:val="left"/>';
   ["<w:b/><w:bCs/><w:caps/>", "<w:caps/>", "<w:b/><w:bCs/>", "<w:b/><w:i/>", "<w:i/>"].forEach((r, n) =>
-    s += est(`Heading${n + 1}`, `heading ${n + 1}`, tit + `<w:outlineLvl w:val="${n}"/>`, r, "Normal"));
+    s += est(`Heading${n + 1}`, `heading ${n + 1}`, tit + `<w:outlineLvl w:val="${n}"/>`, tf + r + tc, "Normal"));
   const centro = '<w:keepNext/><w:spacing w:before="0" w:after="360" w:line="360" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/>';
-  s += est("TituloSemNumero", "Título sem indicativo numérico", centro + '<w:outlineLvl w:val="0"/>', "<w:b/><w:bCs/><w:caps/>", "Normal");
-  s += est("TituloSumario", "Título do sumário", centro, "<w:b/><w:bCs/><w:caps/>", "Normal");
-  s += est("TituloDocumento", "Título do documento", '<w:keepNext/><w:spacing w:before="0" w:after="60" w:line="276" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/>', '<w:b/><w:bCs/><w:caps/><w:sz w:val="26"/><w:szCs w:val="26"/>');
+  s += est("TituloSemNumero", "Título sem indicativo numérico", centro + '<w:outlineLvl w:val="0"/>', tf + "<w:b/><w:bCs/><w:caps/>" + tc, "Normal");
+  s += est("TituloSumario", "Título do sumário", centro, tf + "<w:b/><w:bCs/><w:caps/>" + tc, "Normal");
+  s += est("TituloDocumento", "Título do documento", '<w:keepNext/><w:spacing w:before="0" w:after="60" w:line="276" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/>', tf + '<w:b/><w:bCs/><w:caps/>' + tc + '<w:sz w:val="26"/><w:szCs w:val="26"/>');
   const peq = '<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/>';
   s += est("Legenda", "caption", '<w:keepNext/><w:spacing w:before="240" w:after="60" w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="center"/>', '<w:sz w:val="20"/><w:szCs w:val="20"/>');
   s += est("Fonte", "Fonte de ilustração", '<w:spacing w:before="60" w:after="240" w:line="240" w:lineRule="auto"/><w:ind w:firstLine="0"/><w:jc w:val="left"/>', '<w:sz w:val="20"/><w:szCs w:val="20"/>');
@@ -904,15 +960,15 @@ function numeracaoXml(ctx) {
   const a = [
     [1, nv(0, "lowerLetter", "%1)", 1134, 425) + nv(1, "bullet", "–", 1560, 426) + nv(2, "bullet", "–", 1985, 425)],
     [2, nv(0, "decimal", "%1.", 1134, 425) + nv(1, "lowerLetter", "%2)", 1560, 426) + nv(2, "bullet", "–", 1985, 425)],
-    [3, nv(0, "bullet", "•", 1134, 425, "Arial") + nv(1, "bullet", "–", 1560, 426) + nv(2, "bullet", "–", 1985, 425)],
+    [3, nv(0, "bullet", "•", 1134, 425, VISUAL.fonte_texto || "Arial") + nv(1, "bullet", "–", 1560, 426) + nv(2, "bullet", "–", 1985, 425)],
     [4, nv(0, "bullet", "☐", 1134, 425, "Segoe UI Symbol") + nv(1, "bullet", "☐", 1560, 426, "Segoe UI Symbol") + nv(2, "bullet", "–", 1985, 425)]];
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering ${NS}>` +
     a.map(([id, lv]) => `<w:abstractNum w:abstractNumId="${id}"><w:multiLevelType w:val="multilevel"/>${lv}</w:abstractNum>`).join("") +
     ctx.nums.map(([nid, aid]) => `<w:num w:numId="${nid}"><w:abstractNumId w:val="${aid}"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>`).join("") +
     "</w:numbering>";
 }
-const settingsXml = atualizar => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings ${NS}>` +
-  '<w:defaultTabStop w:val="709"/><w:hyphenationZone w:val="425"/><w:characterSpacingControl w:val="doNotCompress"/>' + (atualizar ? '<w:updateFields w:val="true"/>' : "") +
+const settingsXml = (atualizar, embutir) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings ${NS}>` +
+  (embutir ? "<w:embedTrueTypeFonts/>" : "") + '<w:defaultTabStop w:val="709"/><w:hyphenationZone w:val="425"/><w:characterSpacingControl w:val="doNotCompress"/>' + (atualizar ? '<w:updateFields w:val="true"/>' : "") +
   '<w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat>' +
   '<w:themeFontLang w:val="pt-BR"/><w:decimalSymbol w:val=","/><w:listSeparator w:val=";"/></w:settings>';
 
@@ -1021,7 +1077,7 @@ function montar(spec, conteudo) {
 
   if (!longo) {
     corpo += par(run(tipoNome.toUpperCase() + (spec.titulo ? ` – ${spec.titulo}` : ""), { b: true }), { estilo: "TituloDocumento" });
-    corpo += par(run(`${spec.codigo}  ·  Versão ${spec.versao}  ·  Emissão ${spec.data_emissao}  ·  `, { sz: 9, cor: "404040" }) +
+    corpo += par(run(`${spec.codigo}  ·  Versão ${spec.versao}  ·  Emissão ${spec.data_emissao}  ·  `, { sz: 9, cor: sec("404040") }) +
       run(est.rotulo.toUpperCase(), { sz: 9, b: true, cor: est.cor }), { jc: "center", antes: 0, depois: 240, linha: 240, estilo: "SemRecuo" });
     // empresa e documento já estão no cabeçalho
     if (spec.identificacao && spec.identificacao.length) corpo += blocoCampos(spec.identificacao, largT, 3.3);
@@ -1032,16 +1088,17 @@ function montar(spec, conteudo) {
     const altura = 29.7 - MARG_TIMBRADO[0] - MARG_TIMBRADO[2];
     const cp = (x, o = {}) => par(x, { jc: "center", antes: o.antes || 0, depois: o.depois || 0, linha: o.linha || 276, estilo: "SemRecuo" });
     const linhaCapa = (h, c, va) => `<w:tr><w:trPr><w:trHeight w:val="${I(h * TW_CM)}" w:hRule="exact"/></w:trPr><w:tc><w:tcPr><w:tcW w:w="${largT}" w:type="dxa"/><w:vAlign w:val="${va}"/></w:tcPr>${c}</w:tc></w:tr>`;
-    const meio = cp(run(tipoNome.toUpperCase(), { sz: 12, cor: EMPRESA.cor, b: true, esp: 40 }), { depois: 240 }) +
-      cp(run(spec.titulo.toUpperCase(), { b: true, sz: 22 }), { linha: 300, depois: 200 }) +
-      (spec.subtitulo ? cp(run(spec.subtitulo, { sz: 14, cor: "262626" }), { depois: 480 }) : cp("", { depois: 480 }));
+    const ft = VISUAL.fonte_titulo;
+    const meio = cp(run(tipoNome.toUpperCase(), { sz: 12, cor: EMPRESA.cor, b: true, esp: 40, fonte: ft }), { depois: 240 }) +
+      cp(run(spec.titulo.toUpperCase(), { b: true, sz: 22, fonte: ft, cor: VISUAL.cor_titulo }), { linha: 300, depois: 200 }) +
+      (spec.subtitulo ? cp(run(spec.subtitulo, { sz: 14, cor: sec("262626") }), { depois: 480 }) : cp("", { depois: 480 }));
     const ctab = [["Código", spec.codigo], ["Versão", spec.versao], ["Estado", est.rotulo.toUpperCase()], ["Classificação", spec.classificacao]];
     const wqs = [1.6, 1, 1, 1].map(p => I(largT * p / 4.6));
     let quadro = `<w:tbl><w:tblPr><w:tblW w:w="${wqs.reduce((a, c) => a + c, 0)}" w:type="dxa"/><w:jc w:val="center"/><w:tblBorders><w:top w:val="single" w:sz="6" w:space="0" w:color="000000"/>` +
       `<w:bottom w:val="single" w:sz="6" w:space="0" w:color="000000"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/></w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr><w:tblGrid>${grade(wqs)}</w:tblGrid><w:tr>`;
     ctab.forEach(([rot, val], k) => quadro += `<w:tc><w:tcPr><w:tcW w:w="${wqs[k]}" w:type="dxa"/></w:tcPr>` +
-      par(run(rot.toUpperCase(), { sz: 7, cor: "595959", esp: 10 }), { jc: "center", estilo: "TabelaTexto", antes: 60 }) +
-      par(run(val, { b: true, sz: 9.5, cor: rot === "Estado" ? est.cor : "000000" }), { jc: "center", estilo: "TabelaTexto", depois: 60 }) + "</w:tc>");
+      par(run(rot.toUpperCase(), { sz: 7, cor: sec("595959"), esp: 10 }), { jc: "center", estilo: "TabelaTexto", antes: 60 }) +
+      par(run(val, { b: true, sz: 9.5, cor: rot === "Estado" ? est.cor : corTexto() }), { jc: "center", estilo: "TabelaTexto", depois: 60 }) + "</w:tc>");
     quadro += "</w:tr></w:tbl>";
     const base = cp(run(spec.local, { b: true })) + cp(run(spec.data_emissao.slice(-4), { b: true }));
     corpo += `<w:tbl><w:tblPr><w:tblW w:w="${largT}" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblCellMar><w:left w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr>` +
@@ -1097,7 +1154,42 @@ function montar(spec, conteudo) {
 }
 
 const R_OFFICE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
-const TIPOS_REL = { image: "image", header: "header", footer: "footer", styles: "styles", numbering: "numbering", settings: "settings", customXml: "customXml" };
+const TIPOS_REL = { image: "image", header: "header", footer: "footer", styles: "styles", numbering: "numbering", settings: "settings", customXml: "customXml",
+  fontTable: "fontTable", font: "font" };
+// GUID da fonte embutida, tirado do próprio arquivo (o mesmo arquivo dá o mesmo documento, aqui e no gerador).
+function chaveFonte(dados) {
+  const h = [0, 1, 2, 3].map(k => { const b = new Uint8Array(dados.length + 1); b[0] = k; b.set(dados, 1); return crc32(b).toString(16).toUpperCase().padStart(8, "0"); }).join("");
+  return `{${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}}`;
+}
+// Fonte embutida do Word (ECMA-376, 17.8.1): os 32 primeiros bytes em XOR com a chave, bytes ao contrário.
+function ofuscarFonte(dados, chave) {
+  const hex = chave.replace(/[{}-]/g, ""), k = [];
+  for (let i = 0; i < 16; i++) k.push(parseInt(hex.substr(i * 2, 2), 16));
+  k.reverse();
+  const d = new Uint8Array(dados);
+  for (let i = 0; i < 32; i++) d[i] ^= k[i % 16];
+  return d;
+}
+// fontTable.xml e as fontes ofuscadas (word/fonts/fontN.odttf), na ordem do visual: texto, depois títulos.
+function partesFontes(ctx) {
+  if (!FONTES.length) return { xml: null, arquivos: [] };
+  const tag = { regular: "embedRegular", negrito: "embedBold", italico: "embedItalic", negrito_italico: "embedBoldItalic" };
+  const familias = [VISUAL.fonte_texto, VISUAL.fonte_titulo].filter((f, i, a) => f && a.indexOf(f) === i);
+  let xml = ""; const arquivos = [];
+  for (const fam of familias) {
+    let emb = "";
+    for (const est of ESTILOS_FONTE) {
+      const f = FONTES.find(x => x[0] === fam && x[1] === est);
+      if (!f) continue;
+      const nome = `font${arquivos.length + 1}.odttf`, chave = chaveFonte(f[2]);
+      const rid = ctx.rel("word/fontTable.xml", "font", `fonts/${nome}`);
+      emb += `<w:${tag[est]} r:id="${rid}" w:fontKey="${chave}"/>`;
+      arquivos.push([`word/fonts/${nome}`, ofuscarFonte(f[2], chave)]);
+    }
+    xml += `<w:font w:name="${esc(fam)}"><w:charset w:val="00"/><w:family w:val="roman"/><w:pitch w:val="variable"/>${emb}</w:font>`;
+  }
+  return { xml: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:fonts ${NS}>${xml}</w:fonts>`, arquivos };
+}
 const VERSAO_TIMBRADOR = "2026-09-16";
 // Namespace da ficha embutida. A leitura aceita qualquer namespace terminado em "timbrador:ficha", inclusive o
 // dos documentos emitidos antes do white label.
@@ -1118,6 +1210,8 @@ const jsonPy = v => Array.isArray(v) ? "[" + v.map(jsonPy).join(", ") + "]"
   : v === undefined ? "null" : JSON.stringify(v);
 function gerarDocx(spec, conteudo) {
   const { ctx, documento, partes, temSumario } = montar(spec, conteudo);
+  const fontes = partesFontes(ctx);
+  if (fontes.xml) ctx.rel("word/document.xml", "fontTable", "fontTable.xml");
   const est = ESTADOS[spec.estado], agora = new Date().toISOString().replace(/\.\d+Z$/, "Z");
   const W = "application/vnd.openxmlformats-officedocument.wordprocessingml.";
   const arquivos = [];
@@ -1125,6 +1219,8 @@ function gerarDocx(spec, conteudo) {
   add("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
     '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
     '<Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/>' +
+    (fontes.xml ? '<Default Extension="odttf" ContentType="application/vnd.openxmlformats-officedocument.obfuscatedFont"/>' +
+      `<Override PartName="/word/fontTable.xml" ContentType="${W}fontTable+xml"/>` : "") +
     `<Override PartName="/word/document.xml" ContentType="${W}document.main+xml"/><Override PartName="/word/styles.xml" ContentType="${W}styles+xml"/>` +
     `<Override PartName="/word/numbering.xml" ContentType="${W}numbering+xml"/><Override PartName="/word/settings.xml" ContentType="${W}settings+xml"/>` +
     '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' +
@@ -1152,7 +1248,8 @@ function gerarDocx(spec, conteudo) {
   add("word/document.xml", documento);
   add("word/styles.xml", estilosXml());
   add("word/numbering.xml", numeracaoXml(ctx));
-  add("word/settings.xml", settingsXml(temSumario));
+  add("word/settings.xml", settingsXml(temSumario, !!fontes.xml));
+  if (fontes.xml) { add("word/fontTable.xml", fontes.xml); for (const [n, d] of fontes.arquivos) arquivos.push([n, d]); }
   for (const [p, [t, c]] of Object.entries(partes)) add(p, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:${t} ${NS}>${c}</w:${t}>`);
   for (const [parte, lst] of Object.entries(ctx.rels)) {
     const [d, b] = [parte.slice(0, parte.lastIndexOf("/")), parte.slice(parte.lastIndexOf("/") + 1)];
@@ -1795,8 +1892,7 @@ function organizar(itens) {
     if (ORG.tipos_ativos.includes(antes.tipo)) $("tipo").value = antes.tipo;
     if (antes.area && AREAS[antes.area]) { garantirOpcaoArea(antes.area); $("area").value = antes.area; }
     mostrarLogo($("empresa").value);
-    const cor = EMPRESAS[ORG.padrao].cor;
-    document.documentElement.style.setProperty("--cor", "#" + cor);
+    aplicarVisual();
     $("titulo-pagina").textContent = ORG.organizacao ? `Timbrador · ${ORG.organizacao}` : "Timbrador";
     document.title = ORG.organizacao ? `Timbrador ${ORG.organizacao}` : "Timbrador";
     $("rodape-padrao").textContent = [ORG.politica && `Padrão ${ORG.politica}`, ORG.organizacao].filter(Boolean).join(" · ");
@@ -1811,6 +1907,26 @@ function organizar(itens) {
     $("marca-exportar").hidden = false;
     $("marca-bloco").classList.add("ligada");
     document.body.classList.remove("sem-marca");
+  }
+  // A interface veste o "visual" da marca: cores e fontes (as mesmas embutidas no documento).
+  let facesCarregadas = [];
+  function aplicarVisual() {
+    const raiz = document.documentElement.style, V = VISUAL;
+    const vars = { "--cor": "#" + (V.cor_titulo || EMPRESAS[ORG.padrao].cor), "--tinta": V.cor_texto, "--suave": V.cor_secundaria,
+      "--linha": V.cor_linha, "--fundo": V.cor_papel, "--cartao": V.cor_cartao };
+    for (const [k, v] of Object.entries(vars)) if (v) raiz.setProperty(k, v.startsWith("#") ? v : "#" + v); else raiz.removeProperty(k);
+    for (const f of facesCarregadas) document.fonts.delete(f);
+    facesCarregadas = [];
+    if (typeof FontFace === "function" && document.fonts) {
+      const desc = { regular: {}, negrito: { weight: "700" }, italico: { style: "italic" }, negrito_italico: { weight: "700", style: "italic" } };
+      for (const [fam, est, dados] of FONTES) {
+        try { const f = new FontFace(fam, dados.slice().buffer, desc[est]); document.fonts.add(f); facesCarregadas.push(f); } catch (e) { /* fonte que o navegador não aceita: fica a reserva */ }
+      }
+    }
+    const pilha = (fam, reserva) => fam ? `"${fam}", ${reserva}` : "";
+    if (V.fonte_texto) raiz.setProperty("--fonte-texto", pilha(V.fonte_texto, "Georgia, serif")); else raiz.removeProperty("--fonte-texto");
+    if (V.fonte_titulo) raiz.setProperty("--fonte-titulo", pilha(V.fonte_titulo, "Georgia, serif")); else raiz.removeProperty("--fonte-titulo");
+    document.body.classList.toggle("com-visual", !!(V.fonte_texto || V.fonte_titulo || V.cor_papel));
   }
   function usarMarca(texto, guardarNoNavegador) {
     try { carregarMarca(texto); }
