@@ -17,6 +17,9 @@ Timbrador*.zip
 # Dado de empresa real (razão social, CNPJ) não volta para o código.
 marca.json
 skills/timbrador/assets/marca.json
+# Ícone do site da organização (pagina/favicon.svg, favicon.png, apple-touch-icon.png)
+pagina/favicon.*
+pagina/apple-touch-icon.png
 *_portatil.json
 lista-mestra.json
 

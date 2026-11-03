@@ -92,7 +92,9 @@ de nomes refeita para uma família por fonte (Regular, Italic e Bold = Garamond
 estão em `saida/mhdn/` (fora do git). A página busca esse arquivo ao abrir e o usa enquanto o navegador não
 guardou uma marca própria (Editar/Importar guardam; "Usar a do site" volta). A
 mesma cópia está em `skills/timbrador/assets/marca.json` (também fora do git),
-que o gerador acha sozinho. **O `marca.json` do site é público** (tem o CPF):
+que o gerador acha sozinho. O ícone do site (`pagina/favicon.svg`, `favicon.png`, `apple-touch-icon.png`,
+fora do git) é o livro de capa azul (`Mhdn logo simplificada capa azul.SVG` do
+brandbook) sem o fundo, recortado em quadrado; a página só aponta para esses nomes. **O `marca.json` do site é público** (tem o CPF):
 sem Cloudflare Access no hostname, qualquer um o baixa.
 
 ## Invariantes
