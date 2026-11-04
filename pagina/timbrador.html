@@ -61,7 +61,13 @@
   [hidden] { display:none !important; }
   /* A lista mestra e o campo de número são da publicação: quem só redige nunca os vê. */
   .lista, .campo-numero { display:none; }
-  body.publicando .lista, body.com-lista .lista, body.publicando .campo-numero { display:block; }
+  body.publicando .lista, body.com-lista .lista, body.conectando .lista, body.publicando .campo-numero { display:block; }
+  /* Progresso da pasta: pela rede, procurar a lista e mapear as pastas leva segundos; a barra mostra que está andando. */
+  .progresso { margin-top:8px; font-size:13px; color:var(--suave); }
+  .progresso .barra { height:4px; border-radius:2px; background:var(--linha); overflow:hidden; margin-bottom:6px; }
+  .progresso .barra span { display:block; width:35%; height:100%; border-radius:2px; background:var(--cor); animation:andando 1.1s ease-in-out infinite; }
+  @keyframes andando { from { transform:translateX(-100%); } to { transform:translateX(290%); } }
+  @media (prefers-reduced-motion:reduce) { .progresso .barra span { animation:none; width:100%; opacity:.5; } }
   .lista { border:1px solid var(--linha); border-radius:10px; padding:10px 12px; margin-bottom:18px; background:var(--lista); font-size:14px; }
   .lista-topo { display:flex; align-items:center; justify-content:space-between; gap:10px; }
   .lista.ligada { border-color:var(--ok); background:var(--ok-fundo); }
@@ -154,14 +160,21 @@
   button.secundario { width:auto; flex:none; padding:14px 18px; color:var(--cor-texto); background:var(--cartao); border:1px solid var(--cor-texto); }
   /* Prévia: o PDF ocupa a metade direita da tela e o formulário passa para o meio da metade esquerda. */
   main { transition:margin .25s ease; }
-  body.com-previa main { margin-left:max(16px, calc(25vw - 280px)); margin-right:0; max-width:min(560px, calc(50vw - 32px)); }
-  #previa { position:fixed; top:0; right:0; bottom:0; width:50vw; display:flex; flex-direction:column; background:var(--cartao); border-left:1px solid var(--linha); box-shadow:-6px 0 24px var(--sombra); z-index:40; }
+  body.com-previa main, body.com-registro main { margin-left:max(16px, calc(25vw - 280px)); margin-right:0; max-width:min(560px, calc(50vw - 32px)); }
+  #previa, #registro { position:fixed; top:0; right:0; bottom:0; width:50vw; display:flex; flex-direction:column; background:var(--cartao); border-left:1px solid var(--linha); box-shadow:-6px 0 24px var(--sombra); z-index:40; }
   .previa-topo { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--linha); font-size:14px; }
+  /* Inventário: o relatório fica no topo do painel e o registro de cada arquivo lido, abaixo, rola sozinho. */
+  #registro-estado { flex:1; color:var(--suave); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #registro-relatorio:not(:empty) { padding:10px 14px; font-size:14px; border-bottom:1px solid var(--linha); max-height:55%; overflow:auto; }
+  #registro-relatorio ul { margin:6px 0 0; padding-left:18px; }
+  #registro-relatorio.erro { color:var(--erro); }
+  #registro-linhas { flex:1; overflow:auto; margin:0; padding:10px 14px 10px 44px; font:12px/1.6 Consolas, "Courier New", monospace; color:var(--suave); }
+  #registro-linhas li.erro { color:var(--erro); }
   #previa-estado { flex:1; color:var(--suave); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #previa-aviso:not(:empty) { padding:8px 14px; font-size:13px; color:var(--alerta-tinta); background:var(--alerta-fundo); border-bottom:1px solid var(--linha); }
   #previa-aviso ul { margin:4px 0 0; padding-left:18px; }
   #previa-quadro { flex:1; width:100%; border:0; background:var(--quadro); }
-  @media (max-width:900px) { #previa { width:100vw; } body.com-previa main { max-width:560px; margin:40px auto; } }
+  @media (max-width:900px) { #previa, #registro { width:100vw; } body.com-previa main, body.com-registro main { max-width:560px; margin:40px auto; } }
   @media (max-width:480px) { .grade, .rel-grade3, .rel-grade-comp { grid-template-columns:1fr; } .rel-rodadas { font-size:11px; } .cartao { padding:20px; } }
   /* Botão de tema no canto do formulário; no escuro o logo ganha um fundo claro para continuar legível. */
   button#tema { position:absolute; top:12px; right:12px; width:auto; margin:0; padding:4px 10px; font-size:13px; font-weight:600; color:var(--suave); background:none; border:1px solid var(--linha); border-radius:999px; }
@@ -232,6 +245,7 @@
         <span><strong>Lista mestra</strong> <span id="lista-estado">sem controle</span></span>
         <span class="botoes"><button type="button" class="acao" id="lista-inventariar" hidden>Inventariar</button><button type="button" class="acao" id="lista-conectar">Conectar pasta</button></span>
       </div>
+      <div class="progresso" id="lista-progresso" role="status" hidden><div class="barra"><span></span></div><span id="lista-progresso-texto"></span></div>
       <div class="dica" id="lista-dica">O número sai daqui. Conecte a pasta dos documentos para reservar o próximo livre e registrar a publicação.</div>
       <input type="file" id="lista-arquivo" accept=".json,application/json">
     </div>
@@ -391,6 +405,11 @@
   <div class="previa-topo"><strong>Prévia em PDF</strong><span id="previa-estado"></span><button type="button" class="acao" id="previa-atualizar">Atualizar</button><button type="button" class="acao" id="previa-fechar">Fechar</button></div>
   <div id="previa-aviso"></div>
   <iframe id="previa-quadro" title="Prévia do documento em PDF"></iframe>
+</aside>
+<aside id="registro" hidden aria-label="Inventário da pasta">
+  <div class="previa-topo"><strong>Inventário</strong><span id="registro-estado"></span><button type="button" class="acao" id="registro-fechar">Fechar</button></div>
+  <div id="registro-relatorio" aria-live="polite"></div>
+  <ol id="registro-linhas"></ol>
 </aside>
 <script id="nucleo">
 "use strict";
@@ -3597,6 +3616,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   // procura um lista-mestra.json já existente na árvore (ex.: "controle/timbrador")
   async function acharListas(dir, prefixo, prof) {
     const achados = [];
+    progresso(`Procurando a lista mestra… ${++pastasLidas} pasta(s) lida(s).`);
     for await (const [nome, h] of dir.entries()) {
       if (h.kind === "file" && nome === LISTA_ARQUIVO) achados.push({ dir, caminho: prefixo || dir.name });
       else if (h.kind === "directory" && prof > 0 && !nome.startsWith(".")) {
@@ -3614,6 +3634,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     let obsoletos = null, projetosRaiz = null;
     const nivel = c => c.split("/").length;
     async function andar(h, caminho, prof) {
+      progresso(`Mapeando as pastas de tipo e de projeto… ${++pastasLidas} pasta(s) lida(s).`);
       for await (const [nome, f] of h.entries()) {
         if (f.kind !== "directory" || nome.startsWith(".") || nome.startsWith("~$")) continue;
         const c = juntar(caminho, nome), n = semAcento(nome);
@@ -3714,9 +3735,21 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
         ($("com_anexos").checked ? ", numa pasta com o código do documento, junto com os anexos." : ".");
     } catch (e) { $("salvar-dica").textContent = ""; }
   }
+  // Progresso no próprio bloco da lista mestra (a mensagem geral fica no fim do formulário, longe do botão).
+  let pastasLidas = 0;
+  function progresso(texto) {
+    document.body.classList.toggle("conectando", texto !== null);
+    $("lista-progresso").hidden = texto === null;
+    if (texto !== null) $("lista-progresso-texto").textContent = texto;
+  }
   async function usarPasta(dir, avisar) {
+    pastasLidas = 0;
+    try { await usarPastaComProgresso(dir, avisar); } finally { progresso(null); }
+  }
+  async function usarPastaComProgresso(dir, avisar) {
     pasta = dir;
     let achados = [];
+    progresso(`Abrindo ${dir.name}…`);
     try { achados = await acharListas(dir, "", 4); } catch (e) { achados = []; }   // navegador sem varredura: usa a própria pasta
     if (achados.length > 1) {
       pasta = null; lista = null; pastaLista = null;
@@ -3725,9 +3758,11 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     }
     pastaLista = achados.length ? achados[0].dir : dir;
     caminhoLista = achados.length ? achados[0].caminho : dir.name;
+    progresso(`Lendo a lista mestra em ${caminhoLista}…`);
     lista = await listaDaPasta(pastaLista);
     lembrada = null;
     mapa = null;
+    pastasLidas = 0;
     try { await mapearPastas(); } catch (e) { mapa = null; }
     if (anterior) atualizarModo();      // com a pasta, a versão substituída pode ser achada sozinha
     await guardarPasta({ raiz: dir, nome: dir.name });
@@ -3735,6 +3770,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     mostrarLista();
   }
   async function conectarLista() {
+    $("lista-conectar").disabled = true;
     try {
       if (!temPasta) { $("lista-arquivo").click(); return; }
       if (lembrada) {                       // pasta lembrada: só reconfirmar o acesso, sem procurar de novo
@@ -3747,6 +3783,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
         throw new Error("Sem permissão de gravação na pasta escolhida.");
       await usarPasta(dir, true);
     } catch (e) { if (e.name !== "AbortError") msg(escH(e.message), "erro"); mostrarLista(); }
+    finally { $("lista-conectar").disabled = false; }
   }
   // na abertura: se a pasta da última vez ainda estiver autorizada, reconecta sozinha
   (async () => {
@@ -3766,10 +3803,11 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   $("lista-inventariar").addEventListener("click", async () => {
     if (!pasta) return;
     $("lista-inventariar").disabled = $("lista-conectar").disabled = $("gerar").disabled = true;
-    msg("Lendo os documentos da pasta…");
+    abrirRegistro(`lendo ${pasta.name}…`); msg("Inventariando a pasta: acompanhe no painel Inventário, à direita.");
+    progresso("Inventariando: abrindo a pasta…");
     try {
       lista = await listaDaPasta(pastaLista);
-      const { lista: nova, relatorio: r } = await inventariar(pasta, lista, (n, nome) => msg(`Lendo ${n}: ${escH(nome)}…`));
+      const { lista: nova, relatorio: r } = await inventariar(pasta, lista, (n, nome) => { registrar(nome); progresso(`Inventariando: ${n} arquivo(s) lido(s) — ${nome}`); });
       lista = nova;
       await gravarEm(pastaLista, LISTA_ARQUIVO, listaTexto(lista));
       const conta = d => Object.entries(d).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${escH(k)} ${v}`).join(" · ") || "nenhum";
@@ -3785,9 +3823,16 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
       if (r.ignorados.length) itens.push(`${r.ignorados.length} arquivo(s) que não são .docx foram ignorados.`);
       if (r.modelos && r.modelos.length) itens.push(`${r.modelos.length} arquivo(s) de partida de modelo foram pulados (não são documentos).`);
       if (Object.keys(r.porOrigem).some(o => o !== "ficha")) itens.push("Documentos lidos do cabeçalho ou do nome do arquivo podem ter título e responsável incompletos: confira na lista.");
-      msg(`Inventário pronto: ${r.docx} arquivo(s) .docx, ${r.documentos} documento(s) na lista mestra.<ul>` +
-        itens.map(x => `<li>${x}</li>`).join("") + "</ul>", "ok");
-    } catch (e) { msg("Não consegui inventariar a pasta: " + escH(e.message), "erro"); }
+      const pronto = `Inventário pronto: ${r.docx} arquivo(s) .docx, ${r.documentos} documento(s) na lista mestra.`;
+      $("registro-relatorio").innerHTML = `<strong>${pronto}</strong><ul>` + itens.map(x => `<li>${x}</li>`).join("") + "</ul>";
+      $("registro-estado").textContent = "concluído"; registrar(`Lista mestra gravada em ${caminhoLista}.`);
+      msg(`${pronto} O relatório está no painel Inventário.`, "ok");
+    } catch (e) {
+      msg("Não consegui inventariar a pasta: " + escH(e.message), "erro");
+      $("registro-relatorio").className = "erro"; $("registro-relatorio").textContent = "Não consegui inventariar a pasta: " + e.message;
+      $("registro-estado").textContent = "falhou"; registrar(e.message, "erro");
+    }
+    progresso(null);
     $("lista-inventariar").disabled = $("lista-conectar").disabled = false;
     $("gerar").disabled = !conteudo;
     mostrarLista();
@@ -4383,7 +4428,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     }
   }
   const agendarPrevia = () => { if (!previaAberta()) return; clearTimeout(previaTimer); previaTimer = setTimeout(atualizarPrevia, 500); };
-  function abrirPrevia() { document.body.classList.add("com-previa"); $("previa").hidden = false; atualizarPrevia(); }
+  function abrirPrevia() { fecharRegistro(); document.body.classList.add("com-previa"); $("previa").hidden = false; atualizarPrevia(); }
   function fecharPrevia() {
     document.body.classList.remove("com-previa"); $("previa").hidden = true; previaVez++;
     $("previa-quadro").removeAttribute("src");
@@ -4392,6 +4437,22 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   $("visualizar").addEventListener("click", abrirPrevia);
   $("previa-atualizar").addEventListener("click", atualizarPrevia);
   $("previa-fechar").addEventListener("click", fecharPrevia);
+  // Painel do inventário: abre no lugar da prévia, com o formulário à esquerda, e registra cada arquivo lido.
+  function abrirRegistro(estado) {
+    if (previaAberta()) fecharPrevia();
+    document.body.classList.add("com-registro"); $("registro").hidden = false;
+    $("registro-relatorio").className = ""; $("registro-relatorio").textContent = ""; $("registro-linhas").textContent = "";
+    $("registro-estado").textContent = estado || "";
+  }
+  function fecharRegistro() { document.body.classList.remove("com-registro"); $("registro").hidden = true; }
+  function registrar(texto, classe) {
+    const li = document.createElement("li"), l = $("registro-linhas");
+    li.textContent = texto; if (classe) li.className = classe;
+    const noFim = l.scrollTop + l.clientHeight >= l.scrollHeight - 4;
+    l.appendChild(li);
+    if (noFim) l.scrollTop = l.scrollHeight;          // acompanha o fim, a menos que a pessoa tenha rolado para cima
+  }
+  $("registro-fechar").addEventListener("click", fecharRegistro);
 
   // Tema: automático (segue o sistema) → claro → escuro. A escolha fica neste navegador; o <head> a aplica antes de desenhar.
   const TEMAS = { "": "automático", claro: "claro", escuro: "escuro" };
