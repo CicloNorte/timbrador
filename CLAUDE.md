@@ -52,7 +52,7 @@ python3 skills/timbrador/scripts/gerar_documento.py --embutir-logos marca.json -
 python3 skills/timbrador/scripts/gerar_documento.py --ler|--atualizar|--obsoletar DOCX --marca marca.json ...
 python3 skills/timbrador/scripts/gerar_documento.py --inventariar PASTA --marca marca.json [--conferir]
 bash testes/fumaca.sh        # marca, curto/longo, travas, grupo, CPF, assinaturas previstas, ciclo de vida, projeto, anexos, lista mestra, inventário, relatório de condução, PDF, XML
-bash testes/pagina.sh        # página × gerador, editor da marca, relatório de condução lido e continuado pelos dois lados e prévia em PDF (precisa de node + jsdom; pula sem eles)
+bash testes/pagina.sh        # página × gerador, editor da marca, relatório de condução lido e continuado pelos dois lados, versão da atualização e prévia em PDF (precisa de node + jsdom; pula sem eles)
 bash testes/inventario.sh    # Inventariar.ps1 × --inventariar: lista mestra e alertas iguais (precisa de pwsh ou TIMBRADOR_PWSH; pula sem ele)
 ```
 
@@ -201,6 +201,14 @@ Python embutido divergiam, **o gerador venceu nos sete pontos** (ver seção 4 d
   .txt, .md, Word comum) vira nova versão dele: `fichaVigente` lê a ficha do .docx que a
   lista registra (pasta conectada) e a página entra no modo atualização, como se o .docx
   tivesse sido solto. Minuta sem número não está na lista: solta-se o próprio .docx.
+- Corpo novo e tipo de alteração (04/11/2026): com um .docx timbrado carregado (minuta
+  inclusive), o conteúdo sem timbre que vier depois troca só o corpo dele (caixa
+  `#sobre-base`, marcada; desmarcada, vira documento novo). Na minuta de nova versão (com
+  `substitui`), o Tipo de alteração oferece a revisão seguinte, a mudança de conteúdo
+  (X+1.0) ou a correção (X.Y+1), contadas da versão oficial substituída. A regra é a
+  mesma nos dois lados: `sugerirAtualizacao`/`versaoPublicada` na página,
+  `preparar_atualizacao`/`versao_publicada` no gerador (`--mudanca conteudo|correcao|rodada`;
+  sem ela, `conteudo` no oficial e `rodada` na minuta). `testes/pagina.sh` compara 21 casos.
 - Largura (04/11/2026): sem painel aberto, o formulário tem `max-width:50vw` (560px abaixo
   de 900px de tela); com a prévia ou o inventário, vale a regra da metade esquerda.
 - Leitura, lista mestra, inventário e pastas continuam os da página original,
@@ -254,7 +262,8 @@ documentos); `testes/pagina.sh` com visual e fontes embutidas (DejaVu Serif do
 sistema); marca mhdn com visual igual página × gerador (25 e 28 partes); PDFs
 com Newsreader e EB Garamond embutidas (LibreOffice usa as fontes do .docx).
 
-Recursos restaurados e relatório (03/11/2026): `fumaca.sh` com 64 verificações
+Recursos restaurados e relatório (03/11/2026): `fumaca.sh` com 64 verificações (67 com a
+minuta de nova versão, 04/11/2026)
 (assinaturas previstas, projeto, anexos com SHA-256 e anexo alterado recusado,
 inventário com Obsoletos e projeto fora da pasta, 19 casos do relatório de condução);
 `pagina.sh` com o documento de grupo com assinatura e o relatório lido e continuado

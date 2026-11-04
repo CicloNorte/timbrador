@@ -119,6 +119,14 @@ s = json.load(open(sys.argv[1], encoding="utf-8"))
 assert s["versao"] == "2.0-r1" and s["estado"] == "MINUTA" and s["substitui"].startswith("ACME-POP-ECO-003"), s
 PY
 espera_ok "gera a nova versão" python3 "$ger" "$tmp/nova.json" --marca "$marca" --saida "$tmp"
+# minuta de nova versão: sem --mudanca segue na rodada seguinte; --mudanca correcao conta da versão oficial substituída
+minuta_nova="$(ls "$tmp"/ACME-POP-ECO-003_v2.0-r1_MINUTA_*.docx | head -1)"
+for caso in "rodada:2.0-r2:" "correcao:1.1-r1:--mudanca correcao" "conteudo:2.0-r2:--mudanca conteudo"; do
+  IFS=: read -r nome esperada arg <<< "$caso"
+  python3 "$ger" --atualizar "$minuta_nova" --marca "$marca" $arg --o-que-mudou "Teste." --json-saida "$tmp/minuta-$nome.json" > "$saida/.log" 2>&1 &&
+  python3 -c "import json,sys; s=json.load(open(sys.argv[1],encoding='utf-8')); sys.exit(0 if (s['versao'],s['estado'])==(sys.argv[2],'MINUTA') and s['substitui'].endswith(' v1.0') else 1)" "$tmp/minuta-$nome.json" "$esperada" \
+    && ok "minuta de nova versão ($nome): $esperada" || { erro "minuta de nova versão ($nome): $esperada"; sed 's/^/        /' "$saida/.log"; }
+done
 
 echo "== lista mestra =="
 mkdir -p "$tmp/pasta"
