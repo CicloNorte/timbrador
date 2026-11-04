@@ -2663,7 +2663,13 @@ def _hoje():
     return datetime.date.today().strftime("%d/%m/%Y")
 
 
-def preparar_atualizacao(anterior, mudanca="conteudo", o_que_mudou="", estado=None, responsavel=None, data=None):
+def versao_publicada(ficha):
+    """Versão oficial que a minuta vai substituir, tirada da ficha ("ACME-POL-ADM-007 v1.0" -> "1.0"). Espelho de versaoPublicada."""
+    m = re.search(r"\sv(\d+\.\d+)\s*$", str(ficha.get("substitui") or ""))
+    return m.group(1) if m else None
+
+
+def preparar_atualizacao(anterior, mudanca=None, o_que_mudou="", estado=None, responsavel=None, data=None):
     """Monta a especificação da nova versão a partir do documento lido. Devolve (spec_nova, avisos)."""
     avisos = []
     est_ant = anterior.get("estado")
@@ -2675,18 +2681,25 @@ def preparar_atualizacao(anterior, mudanca="conteudo", o_que_mudou="", estado=No
         nova.pop(k, None)
     v_ant = str(anterior.get("versao", "1.0"))
     base = v_ant.split("-r")[0]
-    try:
-        x, y = [int(p) for p in (base.split(".") + ["0"])[:2]]
-    except ValueError:
-        x, y = 1, 0
+    # mudanca: "conteudo" (X+1.0) ou "correcao" (X.Y+1), contadas da versão oficial; "rodada", a revisão seguinte da
+    # minuta. Sem ela: oficial muda o conteúdo, minuta segue na rodada seguinte (mesma regra de sugerirAtualizacao).
+    mudanca = mudanca or ("conteudo" if est_ant == "OFICIAL" else "rodada")
+
+    def salto(v):
+        # parte a parte, como o parseInt(t, 10) || 0 da página
+        x, y = [int(m.group()) if m else 0 for m in (re.match(r"\s*[+-]?\d+", t) for t in (str(v).split(".") + ["0"])[:2])]
+        return f"{x}.{y + 1}" if mudanca == "correcao" else f"{x + 1}.0"
     if est_ant == "OFICIAL":
-        alvo_v = f"{x + 1}.0" if mudanca == "conteudo" else f"{x}.{y + 1}"
-        nova["versao"] = f"{alvo_v}-r1"
+        nova["versao"] = f"{salto(base)}-r1"
         nova["estado"] = estado or "MINUTA"
         nova["substitui"] = f'{anterior.get("codigo", "")} v{v_ant}'.strip()
     else:
         rod = int(v_ant.split("-r")[1]) + 1 if "-r" in v_ant else 1
         nova["versao"] = f"{base}-r{rod}"
+        pub = versao_publicada(anterior)
+        # minuta de nova versão: trocar o tipo de alteração muda a versão alvo; a mesma versão alvo segue na rodada seguinte
+        if pub and mudanca != "rodada" and salto(pub) != base:
+            nova["versao"] = f"{salto(pub)}-r1"
         # Estado aposentado (rascunho, em revisão): a rodada seguinte já sai com o nome atual.
         nova["estado"] = estado or ("MINUTA" if not est_ant else ESTADO_SUCESSOR.get(est_ant, est_ant))
     if nova["estado"] in ("OFICIAL", "OBSOLETO"):
@@ -2794,7 +2807,7 @@ def main():
     ap.add_argument("--embutir-logos", metavar="MARCA", help="grava uma cópia do marca.json com os logos em data URI")
     ap.add_argument("--ler", metavar="DOCX", help="lê um documento timbrado e imprime a especificação JSON (ficha + corpo)")
     ap.add_argument("--atualizar", metavar="DOCX", help="lê um documento timbrado e prepara a especificação da nova versão")
-    ap.add_argument("--mudanca", choices=["conteudo", "correcao"], default="conteudo", help="para documento OFICIAL: mudança de conteúdo (X+1.0) ou só correção (X.Y+1)")
+    ap.add_argument("--mudanca", choices=["conteudo", "correcao", "rodada"], help="mudança de conteúdo (X+1.0) ou só correção (X.Y+1), contadas da versão oficial (a do documento OFICIAL ou a que a minuta substitui); rodada: revisão seguinte da minuta, mesma versão. Padrão: conteudo no OFICIAL, rodada na minuta")
     ap.add_argument("--o-que-mudou", default="", help="descrição da alteração para o histórico")
     ap.add_argument("--estado", help="estado da nova versão (padrão: automático)")
     ap.add_argument("--responsavel", help="quem elaborou a nova versão")
