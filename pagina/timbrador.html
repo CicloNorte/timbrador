@@ -203,7 +203,8 @@
   #marca-tela text { fill:var(--marca-claro); font-family:Helvetica, Arial, sans-serif; font-weight:700; }
   @media (prefers-color-scheme:dark) { :root:not([data-tema="claro"]) #marca-tela text { fill:color-mix(in srgb, var(--marca-cor) 22%, black); } }
   :root[data-tema="escuro"] #marca-tela text { fill:color-mix(in srgb, var(--marca-cor) 22%, black); }
-  body.sem-marca-dagua #marca-tela, body.com-previa #marca-tela, body.com-registro #marca-tela { display:none; }
+  /* sem marca configurada ainda não há documento: a marca d'água espera */
+  body.sem-marca #marca-tela, body.sem-marca-dagua #marca-tela, body.com-previa #marca-tela, body.com-registro #marca-tela { display:none; }
   @media (max-width:900px) { #marca-tela { display:none; } }
   @media print { #menu, #marca-tela { display:none; } }
 </style>
