@@ -265,12 +265,14 @@
       <textarea id="texto-colado" placeholder="Cole o texto do documento. A primeira linha curta vira o título; linhas começando com # viram seções, e com - ou 1. viram listas."></textarea>
       <button type="button" class="acao" id="usar-texto">Usar este texto</button>
     </details>
+    <label class="check" id="bloco-sobre" hidden><input type="checkbox" id="sobre-base" checked><span>Texto novo (colado, .txt, .md ou Word sem timbre) troca só o corpo de <strong id="sobre-ref"></strong>: código, histórico e responsáveis continuam.</span></label>
     <p class="rascunho" id="bloco-rascunho" hidden><span id="rascunho-info"></span> <button type="button" class="acao" id="novo-documento">Começar documento novo</button></p>
     <div class="atualizacao" id="atualizacao" hidden>
       <div class="detectado" id="detectado"></div>
       <div id="bloco-mudanca">
         <label for="mudanca">Tipo de alteração</label>
         <select id="mudanca">
+          <option value="rodada">Nova revisão da minuta</option>
           <option value="conteudo">Mudança de conteúdo (nova versão cheia)</option>
           <option value="correcao">Só correção, sem mudar regra ou valor</option>
         </select>
@@ -1284,16 +1286,20 @@ function validar(spec) {
 }
 
 /* ======================================================================= atualização de documento já timbrado (mesmas regras do gerador) */
+// versão oficial que a minuta vai substituir, tirada da ficha ("ACME-POL-ADM-007 v1.0" → "1.0")
+const versaoPublicada = f => { const m = /\sv(\d+\.\d+)\s*$/.exec(String(f.substitui || "")); return m ? m[1] : null; };
+const xy = v => (String(v).split(".").concat(["0"])).slice(0, 2).map(t => parseInt(t, 10) || 0);
+// mudanca: "rodada" (revisão seguinte da minuta), "conteudo" (X+1.0) ou "correcao" (X.Y+1), contadas da versão oficial
 function sugerirAtualizacao(anterior, mudanca) {
   const vAnt = String(anterior.versao || "1.0"), base = vAnt.split("-r")[0];
-  const [x, y] = (base.split(".").concat(["0"])).slice(0, 2).map(t => parseInt(t, 10) || 0);
-  if (anterior.estado === "OFICIAL") {
-    const alvo = mudanca === "correcao" ? `${x}.${y + 1}` : `${x + 1}.0`;
-    return { versao: `${alvo}-r1`, estado: "MINUTA" };
-  }
+  const salto = v => { const [x, y] = xy(v); return mudanca === "correcao" ? `${x}.${y + 1}` : `${x + 1}.0`; };
+  if (anterior.estado === "OFICIAL") return { versao: `${salto(base)}-r1`, estado: "MINUTA" };
   const rod = vAnt.includes("-r") ? parseInt(vAnt.split("-r")[1], 10) + 1 : 1;
   // Estado aposentado (rascunho, em revisão): a rodada seguinte já sai com o nome atual.
   const est = ESTADO_SUCESSOR[anterior.estado] || anterior.estado || "MINUTA";
+  const pub = versaoPublicada(anterior);
+  // minuta de nova versão: trocar o tipo de alteração muda a versão alvo; a mesma versão alvo segue na rodada seguinte
+  if (pub && mudanca !== "rodada" && salto(pub) !== base) return { versao: `${salto(pub)}-r1`, estado: est };
   return { versao: `${base}-r${rod}`, estado: est };
 }
 function historicoAtualizado(anterior, versaoNova, oQueMudou, responsavel, data) {
@@ -3354,6 +3360,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   $("elaborado_por").addEventListener("input", () => guardar("quem", $("elaborado_por").value.trim()));
 
   let conteudo = null, anterior = null, original = null;
+  let base = null;            // documento timbrado carregado: o texto novo colado depois troca só o corpo dele
   let lista = null, pasta = null, numeroAuto = true;   // lista mestra: dados, pasta conectada (Chrome/Edge) e se o número é sugerido
   let pastaLista = null, caminhoLista = "";           // onde mora o lista-mestra.json dentro da pasta conectada
   let lembrada = null;                                // pasta da última vez, esperando um clique para reconfirmar o acesso
@@ -3376,7 +3383,15 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
       return;
     }
     const e = $("estado").value, obsoletar = e === "OBSOLETO";
-    $("bloco-mudanca").hidden = obsoletar || anterior.estado !== "OFICIAL";
+    const oficial = anterior.estado === "OFICIAL";
+    $("bloco-mudanca").hidden = obsoletar || !(oficial || versaoPublicada(anterior));
+    const vRodada = sugerirAtualizacao(anterior, "rodada").versao;
+    for (const o of $("mudanca").options) {
+      const v = sugerirAtualizacao(anterior, o.value).versao;
+      // oficial não tem rodada; na minuta, some a opção que daria a mesma versão da revisão seguinte
+      o.hidden = o.disabled = oficial ? o.value === "rodada" : o.value !== "rodada" && v === vRodada;
+      o.textContent = { rodada: "Nova revisão da minuta, mesma versão", conteudo: "Mudança de conteúdo, nova versão cheia", correcao: "Só correção, sem mudar regra ou valor" }[o.value] + ` (v${v})`;
+    }
     $("bloco-oque").hidden = obsoletar;
     let v = $("versao").value.trim();
     if (e === "OFICIAL" || obsoletar) v = v.split("-r")[0]; else if (!v.includes("-r")) v += "-r1";
@@ -3889,8 +3904,8 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
       $("projeto").value = f.projeto || (reg && (projetoDaPasta(reg.pasta) || reg.projeto)) || ""; }
     dataManual = false; aprovacaoManual = false; dataDeHoje();
     $("aprovado_por").value = ""; $("substituido_por").value = ""; $("motivo_obsoleto").value = "";
-    $("mudanca").value = "conteudo"; $("o_que_mudou").value = "";
-    const sug = sugerirAtualizacao(f, "conteudo");
+    $("mudanca").value = f.estado === "OFICIAL" ? "conteudo" : "rodada"; $("o_que_mudou").value = "";
+    const sug = sugerirAtualizacao(f, $("mudanca").value);
     $("estado").value = sug.estado; $("versao").value = sug.versao;
     limparFormRel();
     if (f.tipo === "REL" && (f.rodadas || []).length) {    // relatório de condução: a coordenação publica a rodada seguinte
@@ -3910,16 +3925,19 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     if (!MARCA_CARREGADA) return msg("Configure primeiro a marca da organização (botão Configurar, acima).", "erro");
     conteudo = null; anterior = null; $("gerar").disabled = true; msg("Lendo o arquivo…");
     try {
-      let lido, buscado = null;
+      let lido, buscado = null, sobre = null;
       const codigo = $("busca-documento").value.trim().toUpperCase();
+      const naBase = () => (sobre = !codigo && base && $("sobre-base").checked ? JSON.parse(JSON.stringify(base.ficha)) : null);
       if (!["docx", "txt", "md"].includes(ext)) throw new Error("Formato não aceito. Use .docx, .txt ou .md (arquivos .doc antigos: abra no Word e salve como .docx).");
       if (ext === "docx") {
         lido = await lerDocx(await arquivo.arrayBuffer());
         if (!lido.ficha && codigo) lido.ficha = buscado = await fichaVigente(codigo);   // Word sem timbre: nova versão do documento buscado
+        else if (!lido.ficha && naBase()) lido.ficha = sobre;                           // ou corpo novo do documento carregado antes
       } else {
-        if (codigo) buscado = await fichaVigente(codigo);
-        lido = lerTexto(await arquivo.text(), ext === "md", buscado ? buscado.titulo || "" : undefined);
-        if (buscado) lido.ficha = buscado;
+        if (codigo) buscado = await fichaVigente(codigo); else naBase();
+        const ref = buscado || sobre;
+        lido = lerTexto(await arquivo.text(), ext === "md", ref ? ref.titulo || "" : undefined);
+        if (ref) lido.ficha = ref;
       }
       if (lido.ficha && lido.ficha.estado === "OBSOLETO")
         throw new Error(`Este documento está obsoleto${lido.ficha.substituido_por ? ` (substituído por ${lido.ficha.substituido_por})` : ""}. Para atualizar, envie a versão vigente.`);
@@ -3927,6 +3945,9 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
         ? "Não encontrei texto no corpo deste .docx. Costuma acontecer quando o conteúdo está só em imagem, em caixas de texto que o Word não expõe, ou quando o arquivo é um .doc antigo renomeado: abra no Word, use Arquivo > Salvar como > Documento do Word (.docx) e envie de novo. Se o texto for imagem (digitalização), copie o texto para um .txt."
         : "Não encontrei texto no arquivo: ele está vazio ou só tem espaços.");
       conteudo = lido;
+      // documento timbrado lido agora vira a base do próximo texto novo; conteúdo sem ficha e sem base começa documento novo
+      if (!sobre) { base = null;
+        if (lido.ficha && !buscado) try { conferirFicha(lido.ficha, arquivo.name); base = { ficha: JSON.parse(JSON.stringify(lido.ficha)) }; } catch (e) { /* não serve de base */ } }
       { const ex = extrairAssinaturas(conteudo.blocos, conteudo.ficha); conteudo.blocos = ex.blocos; usarEnvolvidos(ex.envolvidos, ex.com);
         if (!ex.com && conteudo.ficha && (conteudo.ficha.assinaturas_previstas || []).length)
           (conteudo.avisos = conteudo.avisos || []).push(`Assinaturas previstas: ${conteudo.ficha.assinaturas_previstas.map(a => a.nome).join(", ")}. Para colocá-las, marque "Com assinatura" (os envolvidos já estão preenchidos).`);
@@ -3939,10 +3960,13 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
       if (conteudo.ficha && conteudo.ficha.modelo) usarModelo(conteudo);
       else if (conteudo.ficha) { anterior = conteudo.ficha; preencher(anterior);
         if (buscado) $("detectado").innerHTML = `<strong>${arquivo.colado ? "Texto colado" : "Conteúdo"} como nova versão de</strong> ${escH(refVersao(anterior))} · ${escH(nomeEstado(anterior.estado))}<br>` +
-          "<span>A identificação veio do .docx vigente na pasta; o corpo é o conteúdo novo. Confira a versão e diga o que mudou.</span>"; }
+          "<span>A identificação veio do .docx vigente na pasta; o corpo é o conteúdo novo. Confira a versão e diga o que mudou.</span>";
+        if (sobre) $("detectado").innerHTML = `<strong>${arquivo.colado ? "Texto colado" : escH(arquivo.name)} como corpo novo de</strong> ${escH(refVersao(anterior))} · ${escH(nomeEstado(anterior.estado))}<br>` +
+          "<span>Código, histórico e responsáveis vêm do documento carregado antes; o corpo é o conteúdo novo. Escolha se sobe a revisão ou a versão e diga o que mudou.</span>"; }
       else if (/-r\d+$|^\d+\.\d+$/.test($("versao").value) && $("versao").value !== "1.0") $("versao").value = "1.0";
       $("soltar").classList.add("cheio");
-      $("soltar-titulo").textContent = arquivo.colado ? `Texto colado${buscado ? ` · nova versão de ${buscado.codigo}` : ""} (${conteudo.blocos.length} bloco${conteudo.blocos.length === 1 ? "" : "s"})` : arquivo.name + (buscado ? ` · nova versão de ${buscado.codigo}` : "");
+      const sufixo = buscado ? ` · nova versão de ${buscado.codigo}` : sobre ? ` · corpo novo de ${codigoDe(sobre)}` : "";
+      $("soltar-titulo").textContent = arquivo.colado ? `Texto colado${sufixo} (${conteudo.blocos.length} bloco${conteudo.blocos.length === 1 ? "" : "s"})` : arquivo.name + sufixo;
       $("soltar-dica").textContent = "Clique, solte outro arquivo ou cole outro texto para trocar";
       $("gerar").disabled = false;
       msg((conteudo.avisos || []).length ? "<ul>" + conteudo.avisos.map(x => `<li>${escH(x)}</li>`).join("") + "</ul>" : "");
@@ -3951,7 +3975,12 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
       $("soltar-dica").textContent = "Word (.docx), texto (.txt) ou Markdown (.md). Pode soltar em qualquer lugar da tela ou colar com Ctrl+V.";
       msg(escH(e.message), "erro");
     }
-    atualizarDicas(); mostrarLista(); agendarRascunho();
+    mostrarBase(); atualizarDicas(); mostrarLista(); agendarRascunho();
+  }
+  // caixa "troca só o corpo": aparece com um documento timbrado carregado
+  function mostrarBase() {
+    $("bloco-sobre").hidden = !base;
+    $("sobre-ref").textContent = base ? refVersao(base.ficha) : "";
   }
   async function carregarOriginal(arquivo, onde) {
     if (!arquivo) return;
@@ -4591,6 +4620,8 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
       }
       if (anterior) $("detectado").innerHTML = `<strong>Documento timbrado reconhecido:</strong> ${escH(refVersao(anterior))} · ${escH(nomeEstado(anterior.estado))}<br>` +
         "<span>Campos recuperados do rascunho. O arquivo será tratado como atualização.</span>";
+      base = null; if (anterior) try { conferirFicha(anterior, "O rascunho"); base = { ficha: JSON.parse(JSON.stringify(anterior)) }; } catch (e) { /* não serve de base */ }
+      mostrarBase();
       atualizarDicas(); mostrarLista(); mostrarDestino();
       const avisos = [`Rascunho recuperado (salvo em ${quandoTxt(r.quando)}).`];
       if (r.semConteudo) avisos.push("O conteúdo não coube no navegador: carregue o arquivo de novo.");
