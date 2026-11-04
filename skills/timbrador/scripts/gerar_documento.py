@@ -2507,8 +2507,10 @@ def inventariar(pasta, destino=None, gravar=True, ignorar=()):
     versao_base = lambda v: str(v or "").split("-r")[0]
     for chave_grupo, itens in sorted(por_codigo.items()):
         codigo = chave_grupo.split("|")[0]
+        # empate de versão e estado (cópias do mesmo arquivo): vale a da pasta do projeto, depois a ordem das pastas
         itens.sort(key=lambda x: (_chave_versao(x["spec"].get("versao")),
-                                  ORDEM_ESTADO.get(x["spec"].get("estado"), 0)))
+                                  ORDEM_ESTADO.get(x["spec"].get("estado"), 0),
+                                  1 if projeto_da_pasta(x["pasta"]) else 0, x["pasta"]))
         em_uso = [i for i in itens if not i["obsoleta"]]
         oficiais = [i for i in em_uso if i["spec"].get("estado") == "OFICIAL"]
         copias = [i for i in itens if i["obsoleta"]]
@@ -2527,9 +2529,17 @@ def inventariar(pasta, destino=None, gravar=True, ignorar=()):
                            f'). A v{oficiais[-1]["spec"].get("versao")} contém as rodadas das anteriores: retire as anteriores da pasta '
                            "(relatório de condução não tem cópia obsoleta).")
         elif len(oficiais) > 1:
-            alertas.append(f'{codigo}: mais de uma versão oficial em uso (' +
-                           "; ".join(f'v{o["spec"].get("versao")} em {o["pasta"]}' for o in oficiais) +
-                           "). A anterior precisa ser tornada obsoleta.")
+            # a mesma versão em mais de uma pasta é cópia do mesmo documento, não versão anterior
+            ult = oficiais[-1]["spec"].get("versao")
+            iguais = [o for o in oficiais if _chave_versao(o["spec"].get("versao")) == _chave_versao(ult)]
+            if len(iguais) < len(oficiais):
+                alertas.append(f'{codigo}: mais de uma versão oficial em uso (' +
+                               "; ".join(f'v{o["spec"].get("versao")} em {o["pasta"]}' for o in oficiais) +
+                               "). A anterior precisa ser tornada obsoleta.")
+            if len(iguais) > 1:
+                alertas.append(f'{codigo} v{ult}: o mesmo documento oficial está em mais de uma pasta (' +
+                               "; ".join(o["pasta"] for o in iguais) +
+                               "). Deixe só uma cópia: documento de projeto fica na pasta do projeto.")
         if oficiais:
             ult = oficiais[-1]["spec"].get("versao")
             for m in em_uso:

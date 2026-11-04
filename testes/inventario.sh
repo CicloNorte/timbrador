@@ -40,6 +40,8 @@ PY
 g "$saida/oficial.json" --saida "$docs"
 g --obsoletar "$(ls "$docs"/ACME-CI-RH-005-*.docx)" --substituido-por "ACME-CI-RH-009/2026 v1.0" --saida "$docs/Obsoletos"
 g "$saida/projeto.json" --saida "$docs"
+# a mesma versão em duas pastas é cópia do mesmo documento, não versão anterior
+cp "$docs"/ACME-CI-RH-006-*.docx "$docs/Projetos/Loja Nova/"
 g "$saida/minuta.json" --saida "$docs/Projetos/Loja Nova"
 g "$saida/modelo.json" --saida "$docs/Modelos"
 # relatório de condução: plano e três versões (a lista do relatório fica à parte, só para publicar)

@@ -344,7 +344,9 @@ foreach ($chave in @($porCodigo.Keys | Sort-Object)) {
                                               @{ Expression = { (Chave-Versao $_.spec["versao"])[1] } },
                                               @{ Expression = { (Chave-Versao $_.spec["versao"])[2] } },
                                               @{ Expression = { (Chave-Versao $_.spec["versao"])[3] } },
-                                              @{ Expression = { $ORDEM_ESTADO["$($_.spec['estado'])"] } })
+                                              @{ Expression = { $ORDEM_ESTADO["$($_.spec['estado'])"] } },
+                                              @{ Expression = { if (Projeto-Da-Pasta $_.pasta) { 1 } else { 0 } } },
+                                              @{ Expression = { $_.pasta } })
   $codigo = ($chave -split "\|", 2)[0]
   # vale a versao em uso: a oficial mais alta; sem oficial, a mais alta em uso; sem nenhuma em uso, a copia obsoleta
   $emUso = @($itens | Where-Object { -not $_.obsoleta })
@@ -365,7 +367,15 @@ foreach ($chave in @($porCodigo.Keys | Sort-Object)) {
   if ($oficiais.Count -gt 1 -and (Tem-Rodadas $s)) {
     $alertas += "${codigo}: relatorio de conducao com mais de um arquivo em uso ($listaOficiais). A v$($oficiais[-1].spec['versao']) contem as rodadas das anteriores: retire as anteriores da pasta (relatorio de conducao nao tem copia obsoleta)."
   } elseif ($oficiais.Count -gt 1) {
-    $alertas += "${codigo}: mais de uma versao oficial em uso ($listaOficiais). A anterior precisa ser tornada obsoleta."
+    # a mesma versao em mais de uma pasta e copia do mesmo documento, nao versao anterior
+    $ultV = $oficiais[-1].spec["versao"]
+    $iguais = @($oficiais | Where-Object { (Compara-Versao $_.spec["versao"] $ultV) -eq 0 })
+    if ($iguais.Count -lt $oficiais.Count) {
+      $alertas += "${codigo}: mais de uma versao oficial em uso ($listaOficiais). A anterior precisa ser tornada obsoleta."
+    }
+    if ($iguais.Count -gt 1) {
+      $alertas += "${codigo} v${ultV}: o mesmo documento oficial esta em mais de uma pasta ($(($iguais | ForEach-Object { $_.pasta }) -join '; ')). Deixe so uma copia: documento de projeto fica na pasta do projeto."
+    }
   }
   if ($oficiais.Count -gt 0) {
     $ult = $oficiais[-1].spec["versao"]
