@@ -196,6 +196,13 @@ Python embutido divergiam, **o gerador venceu nos sete pontos** (ver seção 4 d
   `#registro` no lugar da prévia (um painel por vez, o formulário vai para a esquerda):
   cada arquivo lido entra numa linha (`registrar`) e o relatório fica no topo do painel;
   a mensagem do fim da página só resume.
+- Nova versão pelo código (04/11/2026): na seção Arquivo, `#busca-documento` procura na
+  lista mestra (código ou título) um documento vigente. Conteúdo sem timbre (texto colado,
+  .txt, .md, Word comum) vira nova versão dele: `fichaVigente` lê a ficha do .docx que a
+  lista registra (pasta conectada) e a página entra no modo atualização, como se o .docx
+  tivesse sido solto. Minuta sem número não está na lista: solta-se o próprio .docx.
+- Largura (04/11/2026): sem painel aberto, o formulário tem `max-width:50vw` (560px abaixo
+  de 900px de tela); com a prévia ou o inventário, vale a regra da metade esquerda.
 - Leitura, lista mestra, inventário e pastas continuam os da página original,
   com siglas genéricas (`[A-Z0-9]{2,6}`) e ficha `…timbrador:ficha`.
 - `visual` (opcional): `carregarVisual`/`lerVisual` nos dois lados; `sec()`,
