@@ -1870,7 +1870,9 @@ async function inventariar(dir, lista, aoAndar) {
   let atualizada = listaNormalizar(lista);
   for (const [chave, itens] of Object.entries(porCodigo).sort()) {
     const codigo = chave.split("|")[0];
-    itens.sort((a, b) => comparaVersao(a.spec.versao, b.spec.versao) || (ORDEM_ESTADO[a.spec.estado] || 0) - (ORDEM_ESTADO[b.spec.estado] || 0));
+    // empate de versão e estado (cópias do mesmo arquivo): vale a da pasta do projeto, depois a ordem das pastas
+    itens.sort((a, b) => comparaVersao(a.spec.versao, b.spec.versao) || (ORDEM_ESTADO[a.spec.estado] || 0) - (ORDEM_ESTADO[b.spec.estado] || 0) ||
+      (projetoDaPasta(a.pasta) ? 1 : 0) - (projetoDaPasta(b.pasta) ? 1 : 0) || (a.pasta < b.pasta ? -1 : a.pasta > b.pasta ? 1 : 0));
     const emUso = itens.filter(i => !i.obsoleta), oficiais = emUso.filter(i => i.spec.estado === "OFICIAL"), copias = itens.filter(i => i.obsoleta);
     let atual = oficiais[oficiais.length - 1] || emUso[emUso.length - 1] || copias[copias.length - 1];
     // oficial cuja versão já tem cópia obsoleta: foi substituída e o arquivo ficou para trás na pasta
@@ -1883,8 +1885,14 @@ async function inventariar(dir, lista, aoAndar) {
     if (oficiais.length > 1 && rel)
       alertas.push(`${codigo}: relatório de condução com mais de um arquivo em uso (${oficiais.map(o => `v${o.spec.versao} em ${o.pasta}`).join("; ")}). ` +
         `A v${oficiais[oficiais.length - 1].spec.versao} contém as rodadas das anteriores: retire as anteriores da pasta (relatório de condução não tem cópia obsoleta).`);
-    else if (oficiais.length > 1)
-      alertas.push(`${codigo}: mais de uma versão oficial em uso (${oficiais.map(o => `v${o.spec.versao} em ${o.pasta}`).join("; ")}). A anterior precisa ser tornada obsoleta.`);
+    else if (oficiais.length > 1) {
+      // a mesma versão em mais de uma pasta é cópia do mesmo documento, não versão anterior
+      const ult = oficiais[oficiais.length - 1].spec.versao, iguais = oficiais.filter(o => comparaVersao(o.spec.versao, ult) === 0);
+      if (iguais.length < oficiais.length)
+        alertas.push(`${codigo}: mais de uma versão oficial em uso (${oficiais.map(o => `v${o.spec.versao} em ${o.pasta}`).join("; ")}). A anterior precisa ser tornada obsoleta.`);
+      if (iguais.length > 1)
+        alertas.push(`${codigo} v${ult}: o mesmo documento oficial está em mais de uma pasta (${iguais.map(o => o.pasta).join("; ")}). Deixe só uma cópia: documento de projeto fica na pasta do projeto.`);
+    }
     const ultimaOficial = oficiais[oficiais.length - 1];
     for (const m of emUso) if (m.spec.estado !== "OFICIAL" && ultimaOficial && comparaVersao(versaoBase(m.spec.versao), versaoBase(ultimaOficial.spec.versao)) <= 0)
       alertas.push(`${codigo}: a ${rotuloEstado(m.spec.estado)} v${m.spec.versao} (${m.pasta}) é de uma versão já publicada (v${ultimaOficial.spec.versao}) e pode sair da pasta.`);
