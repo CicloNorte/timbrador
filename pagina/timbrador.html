@@ -160,7 +160,7 @@
   button.secundario { width:auto; flex:none; padding:14px 18px; color:var(--cor-texto); background:var(--cartao); border:1px solid var(--cor-texto); }
   /* Prévia: o PDF ocupa a metade direita da tela e o formulário passa para o meio da metade esquerda. */
   main { transition:margin .25s ease; }
-  body.com-previa main, body.com-registro main { margin-left:max(16px, calc(25vw - 280px)); margin-right:0; max-width:min(560px, calc(50vw - 32px)); }
+  body.com-previa main, body.com-registro main { margin-left:24px; margin-right:0; max-width:calc(50vw - 48px); }
   #previa, #registro { position:fixed; top:0; right:0; bottom:0; width:50vw; display:flex; flex-direction:column; background:var(--cartao); border-left:1px solid var(--linha); box-shadow:-6px 0 24px var(--sombra); z-index:40; }
   .previa-topo { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--linha); font-size:14px; }
   /* Inventário: o relatório fica no topo do painel e o registro de cada arquivo lido, abaixo, rola sozinho. */
@@ -2417,6 +2417,8 @@ function codigosPdf(t) {
 const largCodigos = (cs, k) => (k.mono ? cs.length * 600 : cs.reduce((s, c) => s + (k.b ? HELV_N : HELV)[c - 32], 0)) * k.sz / 1000 + (k.esp || 0) * cs.length;
 const numPdf = v => String(Math.round(v * 100) / 100);
 const corPdf = hex => { const h = String(hex || "000000").replace("#", ""); return [0, 2, 4].map(i => numPdf(parseInt(h.substr(i, 2), 16) / 255)).join(" "); };
+// Texto fora do conteúdo (metadados, como o /Title): UTF-16BE com BOM, que o leitor mostra com qualquer caractere.
+const textoInfo = t => "<FEFF" + Array.from({ length: t.length }, (_, i) => t.charCodeAt(i).toString(16).padStart(4, "0")).join("").toUpperCase() + ">";
 const textoPdf = cs => cs.map(c => c === 40 || c === 41 || c === 92 ? "\\" + String.fromCharCode(c) : c < 32 || c > 126 ? "\\" + c.toString(8).padStart(3, "0") : String.fromCharCode(c)).join("");
 const fontePdf = k => k.mono ? "F5" : "F" + (1 + (k.b ? 1 : 0) + (k.i ? 2 : 0));
 
@@ -2968,7 +2970,7 @@ class DocPdf {
       obj(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${numPdf(PAG_L)} ${numPdf(PAG_A)}] /Resources << ${recursos} >> /Contents ${n + 2} 0 R >>`);
       obj("", enc.encode(txt));
     }
-    const info = obj(`<< /Title (${textoPdf(codigosPdf(titulo || ""))}) /Producer (Timbrador - previa) >>`);
+    const info = obj(`<< /Title ${textoInfo(String(titulo || ""))} /Producer (Timbrador - previa) >>`);
     const xref = pos;
     add(`xref\n0 ${n + 1}\n0000000000 65535 f \n` + ofs.slice(1).map(o => String(o).padStart(10, "0") + " 00000 n \n").join(""));
     add(`trailer\n<< /Size ${n + 1} /Root 1 0 R /Info ${info} 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
