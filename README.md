@@ -33,6 +33,8 @@ Quem tem manual de marca pode acrescentar ao `marca.json` um `visual` com as fon
 
 **Visualizar** mostra, na metade direita da tela, o documento em PDF como ele sairia agora, e acompanha o que se muda no formulário; a borda do formulário fica na cor do estado escolhido. A prévia é desenhada no próprio navegador, sem mandar nada para fora. A paginação é estimada e pode diferir um pouco da do Word, e as fontes do `visual` não entram nela: o documento que vale é o .docx.
 
+Ao conectar a pasta, o bloco da lista mestra mostra o progresso (quantas pastas já foram lidas). **Inventariar** abre um painel à direita, como a prévia, com cada arquivo lido e o relatório no topo.
+
 A página tem modo escuro: segue o tema do sistema, e o botão **Tema**, no canto do formulário, fixa claro ou escuro neste navegador. As cores neutras do `visual` (`cor_papel`, `cor_cartao`, `cor_linha`, `cor_texto`, `cor_secundaria`) valem só no tema claro; a cor dos títulos clareia no escuro. O documento e a prévia em PDF não mudam.
 
 A página também cuida do campo Projeto (o documento vai para `Projetos/Nome`), dos anexos externos, do relatório de condução de projeto e guarda um rascunho do que está na tela se a página for recarregada.

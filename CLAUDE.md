@@ -187,6 +187,13 @@ Python embutido divergiam, **o gerador venceu nos sete pontos** (ver seção 4 d
   (`timbrador.tema`), lido por um script no `<head>` antes de desenhar. O `visual`
   grava as cores neutras em `--v-*`, que só o tema claro usa; texto na cor da marca
   usa `--cor-texto` (clareada no escuro). Cor nova na página: variável, nos dois temas.
+- Progresso da pasta e painel do inventário (04/11/2026): pela rede, conectar a pasta
+  (procurar o `lista-mestra.json` e mapear as pastas) leva segundos. `progresso(texto)`
+  mostra uma barra e quantas pastas já foram lidas no próprio bloco da lista mestra, e
+  o botão fica desabilitado até terminar (`finally`). **Inventariar** abre o painel
+  `#registro` no lugar da prévia (um painel por vez, o formulário vai para a esquerda):
+  cada arquivo lido entra numa linha (`registrar`) e o relatório fica no topo do painel;
+  a mensagem do fim da página só resume.
 - Leitura, lista mestra, inventário e pastas continuam os da página original,
   com siglas genéricas (`[A-Z0-9]{2,6}`) e ficha `…timbrador:ficha`.
 - `visual` (opcional): `carregarVisual`/`lerVisual` nos dois lados; `sec()`,
