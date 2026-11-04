@@ -211,6 +211,15 @@ Python embutido divergiam, **o gerador venceu nos sete pontos** (ver seção 4 d
   sem ela, `conteudo` no oficial e `rodada` na minuta). `testes/pagina.sh` compara 21 casos.
 - Largura (04/11/2026): sem painel aberto, o formulário tem `max-width:50vw` (560px abaixo
   de 900px de tela); com a prévia ou o inventário, vale a regra da metade esquerda.
+- Menu e marca d'água na tela (04/11/2026): o botão `#menu` (canto superior esquerdo) liga e
+  desliga brilho, bordas na cor do estado e marca d'água, guardados em `localStorage`
+  (`timbrador.efeitos`; classes `sem-brilho`, `sem-bordas`, `sem-marca-dagua` no body). A
+  marca d'água do estado (`#marca-tela`, `mostrarMarcaTela`) fica nas faixas livres dos dois
+  lados do formulário, a 45°, com 470 de 595 pt como no documento (larguras da Helvetica
+  da prévia); some no oficial, sem marca configurada, com prévia ou inventário abertos,
+  abaixo de 900px e na impressão. Só tela: o .docx não muda. O menu desce para baixo de
+  um elemento `[data-barra-topo]`, se algum servidor injetar uma barra; o nginx do projeto
+  não injeta.
 - Leitura, lista mestra, inventário e pastas continuam os da página original,
   com siglas genéricas (`[A-Z0-9]{2,6}`) e ficha `…timbrador:ficha`.
 - `visual` (opcional): `carregarVisual`/`lerVisual` nos dois lados; `sec()`,
