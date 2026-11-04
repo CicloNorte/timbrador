@@ -184,10 +184,41 @@
   button#tema:hover { color:var(--tinta); border-color:var(--suave); }
   @media (prefers-color-scheme:dark) { :root:not([data-tema="claro"]) header img { background:#fff; padding:6px 10px; border-radius:10px; box-sizing:content-box; } }
   :root[data-tema="escuro"] header img { background:#fff; padding:6px 10px; border-radius:10px; box-sizing:content-box; }
+  /* Menu do canto superior esquerdo (abaixo da barra do portal, quando o servidor a injeta): liga e desliga os efeitos da tela. */
+  #menu { position:fixed; top:12px; left:12px; z-index:60; }
+  button#menu-botao { display:flex; align-items:center; justify-content:center; width:38px; height:38px; margin:0; padding:0; color:var(--suave); background:var(--cartao); border:1px solid var(--linha); border-radius:10px; box-shadow:0 2px 8px var(--sombra); cursor:pointer; }
+  button#menu-botao:hover, button#menu-botao[aria-expanded="true"] { color:var(--tinta); border-color:var(--suave); }
+  button#menu-botao svg { width:18px; height:18px; }
+  #menu-painel { position:absolute; top:44px; left:0; min-width:230px; padding:6px; background:var(--cartao); border:1px solid var(--linha); border-radius:10px; box-shadow:0 6px 24px var(--sombra); }
+  #menu-painel label { display:flex; align-items:center; gap:10px; margin:0; padding:8px 10px; font-weight:400; font-size:14px; border-radius:8px; cursor:pointer; }
+  #menu-painel label:hover { background:var(--fundo); }
+  body.sem-bordas:not(.editando) .cartao { border-color:var(--linha); }
+  body.sem-brilho:not(.editando) .cartao { box-shadow:none; animation:none; }
+  /* Marca d'água do estado na tela, como no documento (cada uma é uma página A4, texto a 45°): uma em cada lado, nas faixas
+     livres à esquerda e à direita do formulário, atrás dele, sem nunca cobri-lo. Sem espaço (prévia aberta, tela estreita), some. */
+  main { position:relative; z-index:1; }
+  #marca-tela { position:fixed; inset:0; z-index:0; display:grid; grid-template-columns:1fr var(--meio, 50vw) 1fr; pointer-events:none; }
+  #marca-tela[hidden] { display:none; }
+  #marca-tela svg { width:100%; height:100%; }
+  #marca-tela text { fill:var(--marca-claro); font-family:Helvetica, Arial, sans-serif; font-weight:700; }
+  @media (prefers-color-scheme:dark) { :root:not([data-tema="claro"]) #marca-tela text { fill:color-mix(in srgb, var(--marca-cor) 22%, black); } }
+  :root[data-tema="escuro"] #marca-tela text { fill:color-mix(in srgb, var(--marca-cor) 22%, black); }
+  body.sem-marca-dagua #marca-tela, body.com-previa #marca-tela, body.com-registro #marca-tela { display:none; }
+  @media (max-width:900px) { #marca-tela { display:none; } }
+  @media print { #menu, #marca-tela { display:none; } }
 </style>
 <script>try { const t = localStorage.getItem("timbrador.tema"); if (t) document.documentElement.dataset.tema = t; } catch (e) { /* sem armazenamento */ }</script>
 </head>
 <body class="sem-marca">
+<div id="menu">
+  <button type="button" id="menu-botao" aria-label="Menu" aria-expanded="false" aria-controls="menu-painel" title="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+  <div id="menu-painel" hidden>
+    <label><input type="checkbox" id="efeito-brilho" checked> Brilho</label>
+    <label><input type="checkbox" id="efeito-bordas" checked> Bordas coloridas</label>
+    <label><input type="checkbox" id="efeito-marca" checked> Marca d'água</label>
+  </div>
+</div>
+<div id="marca-tela" hidden><svg viewBox="0 0 595 842" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><text x="297.5" y="421" text-anchor="middle" dominant-baseline="central" transform="rotate(-45 297.5 421)"></text></svg><div></div><svg viewBox="0 0 595 842" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><text x="297.5" y="421" text-anchor="middle" dominant-baseline="central" transform="rotate(-45 297.5 421)"></text></svg></div>
 <div id="cobertura">Solte o arquivo para timbrar</div>
 <main>
   <div class="cartao">
@@ -3385,6 +3416,18 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   // versão que substitui: a oficial lida agora ou a registrada na ficha de uma minuta de nova versão
   const substituida = () => !anterior ? null : anterior.estado === "OFICIAL" ? refVersao(anterior) : (anterior.substitui || null);
 
+  /* Marca d'água do estado na tela: o texto ocupa 470 pt de uma página de 595 pt, como no documento. */
+  function mostrarMarcaTela(e) {
+    const est = ESTADOS[e], caixa = document.getElementById("marca-tela");
+    caixa.hidden = !est.marca;
+    if (!est.marca) return;
+    caixa.style.setProperty("--marca-claro", "#" + est.claro); caixa.style.setProperty("--marca-cor", "#" + est.cor);
+    const sz = 470 / largCodigos(codigosPdf(est.marca), { b: true, sz: 1 });   // as larguras da Helvetica da prévia em PDF
+    for (const t of caixa.querySelectorAll("text")) { t.textContent = est.marca; t.setAttribute("font-size", sz.toFixed(1)); }
+  }
+  // a faixa do meio acompanha a largura do formulário, com folga para o brilho
+  if (window.ResizeObserver) new ResizeObserver(() => document.getElementById("marca-tela").style.setProperty("--meio", (document.querySelector(".cartao").offsetWidth + 80) + "px"))
+    .observe(document.querySelector(".cartao"));
   /* ------------------------------------------------ modo atualização (documento já timbrado) */
   function atualizarModo() {
     $("atualizacao").hidden = !anterior;
@@ -3539,6 +3582,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     const e = $("estado").value;
     if (!ESTADOS[e]) return;
     document.body.style.setProperty("--estado", "#" + ESTADOS[e].cor);   // borda do formulário na cor do estado
+    mostrarMarcaTela(e);
     $("estado-dica").textContent = ESTADOS[e].dica
       + (e === "OFICIAL" || e === "OBSOLETO" ? "" : " O código sai com XXX: o número é reservado na publicação.");
     document.body.classList.toggle("oficial", e === "OFICIAL");
@@ -4544,6 +4588,30 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     mostrarTema();
   });
   mostrarTema();
+
+  /* Menu do canto: brilho, bordas coloridas e marca d'água da tela, cada um ligado ou desligado neste navegador. */
+  const EFEITOS = { brilho: "sem-brilho", bordas: "sem-bordas", marca: "sem-marca-dagua" };
+  let efeitos = {};
+  try { efeitos = JSON.parse(localStorage.getItem("timbrador.efeitos") || "{}") || {}; } catch (e) { /* sem armazenamento */ }
+  for (const [k, classe] of Object.entries(EFEITOS)) {
+    const caixa = $("efeito-" + k);
+    caixa.checked = efeitos[k] !== false;
+    document.body.classList.toggle(classe, !caixa.checked);
+    caixa.addEventListener("change", () => {
+      efeitos[k] = caixa.checked; document.body.classList.toggle(classe, !caixa.checked);
+      try { localStorage.setItem("timbrador.efeitos", JSON.stringify(efeitos)); } catch (e) { /* sem armazenamento */ }
+    });
+  }
+  const abrirMenu = abre => { $("menu-painel").hidden = !abre; $("menu-botao").setAttribute("aria-expanded", String(abre)); };
+  $("menu-botao").addEventListener("click", () => abrirMenu($("menu-painel").hidden));
+  document.addEventListener("click", e => { if (!$("menu").contains(e.target)) abrirMenu(false); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("menu-painel").hidden) { abrirMenu(false); $("menu-botao").focus(); } });
+  // uma barra de portal injetada pelo servidor (elemento com data-barra-topo) entra no topo depois que a página carrega
+  // e sai de vista ao rolar: o botão fica logo abaixo dela
+  const posicionarMenu = () => { const b = document.querySelector("[data-barra-topo]"); $("menu").style.top = (Math.max(0, b ? b.getBoundingClientRect().bottom : 0) + 12) + "px"; };
+  addEventListener("scroll", posicionarMenu, { passive: true }); addEventListener("resize", posicionarMenu);
+  new MutationObserver(posicionarMenu).observe(document.body, { childList: true });
+  posicionarMenu();
   document.addEventListener("input", agendarPrevia, true);
   document.addEventListener("change", agendarPrevia, true);
   // Visualizar acompanha o Gerar: liga quando há conteúdo; conteúdo novo (arquivo lido, texto colado) atualiza a prévia
