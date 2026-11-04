@@ -61,7 +61,7 @@
   [hidden] { display:none !important; }
   /* A lista mestra e o campo de número são da publicação: quem só redige nunca os vê. */
   .lista, .campo-numero { display:none; }
-  body.publicando .lista, body.com-lista .lista, body.conectando .lista, body.publicando .campo-numero { display:block; }
+  body.publicando .lista, body.com-lista .lista, body.conectando .lista, body.nova-versao-colada .lista, body.publicando .campo-numero { display:block; }
   /* Progresso da pasta: pela rede, procurar a lista e mapear as pastas leva segundos; a barra mostra que está andando. */
   .progresso { margin-top:8px; font-size:13px; color:var(--suave); }
   .progresso .barra { height:4px; border-radius:2px; background:var(--linha); overflow:hidden; margin-bottom:6px; }
@@ -261,6 +261,10 @@
     <input type="file" id="arquivo" accept=".docx,.txt,.md">
     <details id="colar-bloco">
       <summary>Ou cole o texto aqui</summary>
+      <label for="colar-atualiza">Atualiza o documento <span class="dica">(opcional)</span></label>
+      <input type="text" id="colar-atualiza" list="lista-codigos" autocomplete="off" placeholder="Código na lista mestra, ex.: ACME-POL-VEN-001">
+      <datalist id="lista-codigos"></datalist>
+      <div class="dica" id="colar-atualiza-dica">Para o texto colado virar nova versão de um documento já publicado, conecte a pasta e escolha o código: o Timbrador lê o .docx vigente e calcula a versão, o histórico e a cópia obsoleta.</div>
       <textarea id="texto-colado" placeholder="Cole o texto do documento. A primeira linha curta vira o título; linhas começando com # viram seções, e com - ou 1. viram listas."></textarea>
       <button type="button" class="acao" id="usar-texto">Usar este texto</button>
     </details>
@@ -2307,7 +2311,8 @@ async function lerDocx(buf) {
   return saida;
 }
 
-function lerTexto(str, markdown) {
+// tituloConhecido: texto colado como nova versão; a primeira linha só sai do corpo se for o próprio título do documento
+function lerTexto(str, markdown, tituloConhecido) {
   const linhas = str.replace(/\r\n?/g, "\n").split("\n");
   const itens = []; let buf = [];
   const temVazias = linhas.some(l => !l.trim());
@@ -2334,11 +2339,11 @@ function lerTexto(str, markdown) {
     if (!temVazias) soltar();
   }
   soltar();
-  return organizar(itens);
+  return organizar(itens, tituloConhecido);
 }
 
 const PREFIXO_TIPO = new RegExp("^(" + Object.values(TIPOS_CURTOS).concat(Object.values(TIPOS_LONGOS)).map(t => t.toUpperCase()).join("|") + ")\\s+[–-]\\s+", "i");
-function organizar(itens) {
+function organizar(itens, tituloConhecido) {
   // documento que já estava no padrão: descarta linha de controle e quadro de identificação antigos
   itens = itens.filter(x => !(x.t === "p" && /^[A-Z0-9]{2,6}-[A-Z]+-[A-Z]+-\S+\s+·\s+Versão/.test(x.texto)) &&
                            !(x.t === "tabela" && x.linhas[0] && /^\**Empresa\**$/.test(x.linhas[0][0])));
@@ -2351,8 +2356,9 @@ function organizar(itens) {
   if (!titulo) {
     const primeiro = itens[0];
     const mesmoNivel = primeiro && primeiro.t === "h" ? hs.filter(h => h.nivel === primeiro.nivel).length : 0;
-    if (primeiro && primeiro.t === "h" && mesmoNivel === 1 && itens.length > 1) { titulo = primeiro.texto; itens.shift(); }
-    else if (primeiro && primeiro.t === "p" && primeiro.texto.length <= 120 && itens.length > 1 &&
+    const ehTitulo = t => tituloConhecido === undefined || semAcento(t) === semAcento(tituloConhecido);
+    if (primeiro && primeiro.t === "h" && mesmoNivel === 1 && itens.length > 1 && ehTitulo(primeiro.texto)) { titulo = primeiro.texto; itens.shift(); }
+    else if (primeiro && primeiro.t === "p" && ehTitulo(primeiro.texto.replace(/\*/g, "")) && primeiro.texto.length <= 120 && itens.length > 1 &&
              (primeiro.todoNegrito || primeiro.centro || (primeiro.texto_puro && !/[.:;,]$/.test(primeiro.texto)))) { titulo = primeiro.texto.replace(/\*/g, ""); itens.shift(); }
   }
   const restantes = itens.filter(x => x.t === "h");
@@ -3548,7 +3554,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   // documento ainda sem número: novo, ou minuta/em aprovação lida de um arquivo com código XXX
   function semNumero() { return !anterior || !anterior.numero; }
   function mostrarLista() {
-    mostrarDestino();
+    mostrarDestino(); mostrarCodigos();
     const ligada = !!lista;
     $("lista-bloco").classList.toggle("ligada", ligada);
     // Quem já tem a lista à mão continua vendo o bloco, mesmo redigindo uma minuta.
@@ -3917,8 +3923,9 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     try {
       let lido;
       if (ext === "docx") lido = await lerDocx(await arquivo.arrayBuffer());
-      else if (ext === "txt" || ext === "md") lido = lerTexto(await arquivo.text(), ext === "md");
+      else if (ext === "txt" || ext === "md") lido = lerTexto(await arquivo.text(), ext === "md", arquivo.ficha ? arquivo.ficha.titulo || "" : undefined);
       else throw new Error("Formato não aceito. Use .docx, .txt ou .md (arquivos .doc antigos: abra no Word e salve como .docx).");
+      if (arquivo.ficha) lido.ficha = arquivo.ficha;   // texto colado como nova versão do documento escolhido
       if (lido.ficha && lido.ficha.estado === "OBSOLETO")
         throw new Error(`Este documento está obsoleto${lido.ficha.substituido_por ? ` (substituído por ${lido.ficha.substituido_por})` : ""}. Para atualizar, envie a versão vigente.`);
       if (!lido.blocos.length) throw new Error(ext === "docx"
@@ -3933,12 +3940,14 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
       conteudo.blocos = extrairAnexos(conteudo.blocos);
       if (conteudo.ficha) { usarAnexos(conteudo.ficha.com_anexos ? conteudo.ficha.anexos_externos : [], !!conteudo.ficha.com_anexos); guardarArquivosAnexos(); }
       $("titulo").value = conteudo.titulo || (arquivo.colado ? "" : arquivo.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " "));
-      if (arquivo.colado && !conteudo.titulo) { $("mais").open = true; (conteudo.avisos = conteudo.avisos || []).push("Texto colado sem título: informe o título em Mais opções."); }
+      if (arquivo.colado && !conteudo.titulo && !conteudo.ficha) { $("mais").open = true; (conteudo.avisos = conteudo.avisos || []).push("Texto colado sem título: informe o título em Mais opções."); }
       if (conteudo.ficha && conteudo.ficha.modelo) usarModelo(conteudo);
-      else if (conteudo.ficha) { anterior = conteudo.ficha; preencher(anterior); }
+      else if (conteudo.ficha) { anterior = conteudo.ficha; preencher(anterior);
+        if (arquivo.ficha) $("detectado").innerHTML = `<strong>Texto colado como nova versão de</strong> ${escH(refVersao(anterior))} · ${escH(nomeEstado(anterior.estado))}<br>` +
+          "<span>A identificação veio do .docx vigente na pasta; o corpo é o texto colado. Confira a versão e diga o que mudou.</span>"; }
       else if (/-r\d+$|^\d+\.\d+$/.test($("versao").value) && $("versao").value !== "1.0") $("versao").value = "1.0";
       $("soltar").classList.add("cheio");
-      $("soltar-titulo").textContent = arquivo.colado ? `Texto colado (${conteudo.blocos.length} bloco${conteudo.blocos.length === 1 ? "" : "s"})` : arquivo.name;
+      $("soltar-titulo").textContent = arquivo.colado ? `Texto colado${arquivo.ficha ? ` · nova versão de ${arquivo.ficha.codigo}` : ""} (${conteudo.blocos.length} bloco${conteudo.blocos.length === 1 ? "" : "s"})` : arquivo.name;
       $("soltar-dica").textContent = "Clique, solte outro arquivo ou cole outro texto para trocar";
       $("gerar").disabled = false;
       msg((conteudo.avisos || []).length ? "<ul>" + conteudo.avisos.map(x => `<li>${escH(x)}</li>`).join("") + "</ul>" : "");
@@ -4179,13 +4188,45 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   { const m = guardado("marca"); if (m) { try { carregarMarca(m); cfgAtual = JSON.parse(m); aplicarMarca(); atualizarDicas(); mostrarLista(); } catch (e) { msg("A marca guardada neste navegador não vale mais: " + escH(e.message) + " Carregue o marca.json de novo.", "erro"); } } }
 
   // texto colado: pela caixa "Ou cole o texto aqui" ou com Ctrl+V em qualquer parte da página fora dos campos
-  function carregarTexto(texto) {
+  async function carregarTexto(texto) {
     if (!texto || !texto.trim()) return msg("Não há texto para usar.", "erro");
     const f = new File([texto], "Texto colado.md", { type: "text/markdown" });
     f.colado = true;
+    const codigo = $("colar-atualiza").value.trim().toUpperCase();
+    if (codigo) {
+      try { f.ficha = await fichaVigente(codigo); }
+      catch (e) { return msg(escH(e.message), "erro"); }
+    }
     carregar(f);
   }
+  /* Texto colado como nova versão: a ficha vem do .docx vigente que a lista mestra registra para o código,
+     lido na pasta conectada. O corpo é o texto colado; versão, histórico e cópia obsoleta seguem a ficha. */
+  function vigentes() { return !lista ? [] : listaNormalizar(lista).documentos.filter(d => d.numero && d.arquivo && d.estado !== "OBSOLETO"); }
+  function mostrarCodigos() {
+    const dl = $("lista-codigos"); dl.innerHTML = "";
+    for (const d of vigentes()) { const o = document.createElement("option"); o.value = d.codigo; o.label = `${d.titulo || ""} · v${d.versao} · ${nomeEstado(d.estado)}`; dl.appendChild(o); }
+  }
+  async function fichaVigente(codigo) {
+    if (!pasta) throw new Error(`Para atualizar ${codigo} pelo texto colado, conecte a pasta dos documentos: o Timbrador lê a versão vigente no .docx. Sem a pasta, abra o .docx vigente.`);
+    const reg = vigentes().find(d => d.codigo.toUpperCase() === codigo);
+    if (!reg) throw new Error(`${codigo} não está na lista mestra como documento vigente. Confira o código ou abra o .docx vigente.`);
+    if (!mapa) await mapearPastas();
+    const r = await resolver(reg.pasta && reg.pasta !== "." ? reg.pasta : "");
+    let arq = null;
+    if (r) try { arq = await (await r.h.getFileHandle(reg.arquivo)).getFile(); } catch (e) { /* saiu de lá */ }
+    const onde = juntar(r ? r.caminho : (reg.pasta || ""), reg.arquivo);
+    if (!arq) throw new Error(`Não achei ${onde}, onde a lista mestra registra ${codigo}. Abra o .docx vigente ou rode Inventariar.`);
+    const c = await lerDocx(await arq.arrayBuffer());
+    if (!c.ficha) throw new Error(`${onde} não é um documento timbrado: abra o arquivo e confira.`);
+    if (c.ficha.codigo && c.ficha.codigo.toUpperCase() !== codigo) throw new Error(`${onde} é ${c.ficha.codigo}, não ${codigo}: rode Inventariar para acertar a lista mestra.`);
+    if (c.ficha.estado === "OBSOLETO") throw new Error(`${onde} está obsoleto. Para atualizar, use a versão vigente.`);
+    if (c.ficha.tipo === "REL" && (c.ficha.rodadas || []).length) throw new Error(`${codigo} é relatório de condução: para acrescentar rodada, abra o .docx vigente.`);
+    if (c.ficha.modelo) throw new Error(`${codigo} é arquivo de partida de modelo, não documento a atualizar.`);
+    return c.ficha;
+  }
   $("usar-texto").addEventListener("click", () => carregarTexto($("texto-colado").value));
+  // com um código em "Atualiza o documento", o bloco da pasta aparece mesmo antes de escolher o estado
+  $("colar-atualiza").addEventListener("input", () => document.body.classList.toggle("nova-versao-colada", !!$("colar-atualiza").value.trim()));
   document.addEventListener("paste", e => {
     const alvo = document.activeElement;
     if (alvo && (alvo.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(alvo.tagName))) return;
