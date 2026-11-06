@@ -14,7 +14,12 @@ biblioteca padrão do Python; LibreOffice (soffice, ou o comando em TIMBRADOR_SO
 opcionais e servem para numerar as páginas do sumário e gerar o PDF de conferência.
 """
 import json, re, sys, os, zipfile, shutil, hashlib, subprocess, tempfile, argparse, datetime, unicodedata, base64, shlex, struct
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import escape as _escape
+
+
+def escape(s):
+    """Texto para XML, dentro de elemento ou de atributo entre aspas duplas (como o esc da página)."""
+    return _escape(s, {'"': "&quot;"})
 
 EMU_CM = 360000
 TW_CM = 567
@@ -871,9 +876,16 @@ def nome_anexo(i, original, versao=None):
     return f"Anexo {i:02d}{f' (v{versao})' if versao else ''} – {original}"
 
 
+def _parte_nome(s):
+    """Pedaço de nome de arquivo ou pasta vindo da especificação ou da ficha: sem separador de pasta nem caractere
+    que o Windows recusa, e nunca só pontos (o código ou a versão de um .docx de fora não pode virar caminho)."""
+    s = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "-", str(s))
+    return "-" if s and not s.strip(". ") else s
+
+
 def nome_pasta_doc(spec):
     """Pasta do documento com anexos: o código; minuta (XXX) leva também o título."""
-    cod = str(spec.get("codigo") or "").replace("/", "-")
+    cod = _parte_nome(spec.get("codigo") or "")
     if "XXX" not in cod: return cod
     t = re.sub(r"\s+", " ", re.sub(r'[\\/:*?"<>|()]+', " ", str(spec.get("titulo") or ""))).strip()[:60].strip()
     return f"{cod} – {t}" if t else cod
@@ -939,6 +951,12 @@ def sha256_arquivo(caminho):
     return h.hexdigest()
 
 
+def _nome_simples(nome):
+    """Nome de arquivo sem pasta: nada de / ou \\, nem . ou .. sozinhos (o nome vem da ficha, que é dado de fora)."""
+    nome = str(nome)
+    return bool(nome.strip()) and nome not in (".", "..") and not re.search(r"[\\/\x00]", nome) and not re.match(r"^[A-Za-z]:", nome)
+
+
 def _confere(caminho, a):
     return os.path.isfile(caminho) and os.path.getsize(caminho) == int(a.get("tamanho") or -1) and sha256_arquivo(caminho) == a.get("sha256")
 
@@ -953,6 +971,8 @@ def preparar_anexos(spec, arquivos, pasta_doc):
     itens, avisos, usados = [], [], set()
     for a in [x for x in spec.get("anexos_externos") or [] if isinstance(x, dict)]:
         nome = a.get("nome") or ""
+        if not _nome_simples(nome):   # vem da ficha do documento lido: só nome de arquivo, sem caminho
+            raise SystemExit(f'Anexo com nome inválido na ficha do documento: "{nome}". O nome do anexo não pode ter pasta nem "..".')
         if not _confere(os.path.join(pasta_doc, nome), a):
             if origem and _confere(os.path.join(origem, nome), a):
                 shutil.copy2(os.path.join(origem, nome), os.path.join(pasta_doc, nome))
@@ -1559,8 +1579,8 @@ def paginas_dos_titulos(docx, titulos):
 
 def nome_arquivo(spec):
     slug = re.sub(r"[^a-z0-9]+", "-", spec["titulo"].lower().translate(str.maketrans("áàâãéêíóôõúüç", "aaaaeeiooouuc"))).strip("-")[:50]
-    cod = spec["codigo"].replace("/", "-")
-    return f'{cod}_v{spec["versao"]}_{spec["estado"]}_{slug}.docx'
+    cod = _parte_nome(spec["codigo"])
+    return f'{cod}_v{_parte_nome(spec["versao"])}_{_parte_nome(spec["estado"])}_{slug}.docx'
 
 
 # ----------------------------------------------------------------------------- leitura de documento timbrado

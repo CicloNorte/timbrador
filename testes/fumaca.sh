@@ -88,9 +88,9 @@ espera_ok "grupo, em aprovação, com assinatura" python3 "$ger" "$tmp/grupo.jso
 grep -q "Assinaturas não entram pelo gerador" "$saida/.log" && ok "aviso: assinatura só pela página" || erro "aviso: assinatura só pela página"
 # assinatura entra só pela página: o gerador guarda os envolvidos como previstos na ficha e o corpo sai sem eles
 python3 - "$saida" <<'PY2' && ok "assinaturas viram previstas na ficha" || erro "assinaturas viram previstas na ficha"
-import sys, glob, zipfile, json, re
+import sys, glob, zipfile, json, xml.etree.ElementTree as ET
 z = zipfile.ZipFile(glob.glob(sys.argv[1] + "/GTESTE-*.docx")[0])
-f = json.loads(re.search(r">(\{.*\})<", z.read("customXml/item1.xml").decode()).group(1))
+f = json.loads(ET.fromstring(z.read("customXml/item1.xml")).text)   # a ficha vem escapada (&quot;): lida como XML
 # primeiro os envolvidos da caixa, depois as assinaturas do corpo, sem repetir nome
 assert [a["nome"] for a in f["assinaturas_previstas"]] == ["Ana Teste", "Bruno Teste", "[definir]"], f.get("assinaturas_previstas")
 assert "com_assinatura" not in f and "ANA TESTE" not in z.read("word/document.xml").decode()
@@ -161,8 +161,9 @@ PY2
 espera_recusa "plano sem projeto"                   "Plano é sempre de um projeto" python3 "$ger" "$tmp/pln-sem-projeto.json" --marca "$marca" --saida "$tmp"
 espera_ok     "documento de projeto"                python3 "$ger" "$tmp/com-projeto.json" --marca "$marca" --saida "$tmp/proj"
 python3 - "$tmp/proj" <<'PY2' && ok "projeto na ficha" || erro "projeto na ficha"
-import sys, glob, zipfile
-assert '"projeto": "Loja Nova"' in zipfile.ZipFile(glob.glob(sys.argv[1] + "/*.docx")[0]).read("customXml/item1.xml").decode()
+import sys, glob, zipfile, json, xml.etree.ElementTree as ET
+f = json.loads(ET.fromstring(zipfile.ZipFile(glob.glob(sys.argv[1] + "/*.docx")[0]).read("customXml/item1.xml")).text)
+assert f.get("projeto") == "Loja Nova", f.get("projeto")
 PY2
 espera_ok     "anexos externos (--anexo)"           python3 "$ger" "$tmp/com-anexos.json" --marca "$marca" --saida "$tmp/anxdoc" --anexo "$tmp/anx/conversa.xml" --anexo "$tmp/anx/planilha.csv" --anexo "$tmp/anx/conversa.xml"
 grep -q "arquivo repetido" "$saida/.log" && ok "anexo repetido entra uma vez" || erro "anexo repetido entra uma vez"
@@ -183,6 +184,13 @@ import json, sys
 d = json.load(open(sys.argv[1], encoding="utf-8")); json.dump(d, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)
 PY2
 espera_recusa "anexo alterado na pasta é recusado"   "mesmo conteúdo (SHA-256)" python3 "$ger" "$tmp/anx-adulterado.json" --marca "$marca" --saida "$tmp/anxdoc3"
+# o nome do anexo vem da ficha do .docx lido: com pasta ou "..", a cópia sairia da pasta do documento
+python3 - "$tmp/anx-nova.json" "$tmp/anx-caminho.json" <<'PY2'
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8")); d["anexos_externos"][0]["nome"] = "../../fora.xml"
+json.dump(d, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)
+PY2
+espera_recusa "nome de anexo com pasta é recusado"   "nome inválido" python3 "$ger" "$tmp/anx-caminho.json" --marca "$marca" --saida "$tmp/anxdoc4"
 
 echo "== inventário: Obsoletos e projetos =="
 mkdir -p "$tmp/inv/Obsoletos" "$tmp/inv/Projetos/Loja Nova"
@@ -273,6 +281,21 @@ if python3 -c "import sys; sys.path.insert(0, '$(dirname "$ger")'); import gerar
 else
   echo "  (LibreOffice ausente: PDF não testado)"
 fi
+
+echo "== aspas em atributo =="
+# título de figura com aspas vai para o atributo descr: sem &quot;, o .docx sai quebrado (a conferência abaixo pega)
+python3 - "$raiz/testes/espec-curto.json" "$raiz/skills/timbrador/assets/logo-exemplo.png" "$tmp/figura-aspas.json" <<'PY2'
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8")); d["titulo"] = "Figura com aspas"
+d["corpo"] = d.get("corpo", []) + [{"t": "figura", "caminho": sys.argv[2], "titulo": 'Tela "Início" do sistema'}]
+json.dump(d, open(sys.argv[3], "w", encoding="utf-8"), ensure_ascii=False)
+PY2
+espera_ok "figura com aspas no título" python3 "$ger" "$tmp/figura-aspas.json" --marca "$marca" --saida "$saida"
+python3 - "$saida" <<'PY2' && ok "aspas escapadas no descr" || erro "aspas escapadas no descr"
+import sys, glob, zipfile
+x = zipfile.ZipFile(glob.glob(sys.argv[1] + "/*figura-com-aspas*.docx")[0]).read("word/document.xml").decode()
+assert 'descr="Tela &quot;Início&quot; do sistema"' in x
+PY2
 
 echo "== XML bem formado =="
 for f in "$saida"/*.docx; do
