@@ -567,6 +567,20 @@ def codigo_versao(spec):
     return f'{spec["codigo"]}  ·  v{spec["versao"]}'
 
 
+# Documento confidencial: só as pessoas nomeadas nele ou autorizadas pela direção. A palavra CONFIDENCIAL
+# vai na linha de controle de todas as páginas, para que uma folha solta também diga o que é, e quem pode ler aparece
+# logo abaixo do título (curto) ou na folha de controle (longo).
+COR_CONFIDENCIAL = "C00000"
+
+
+def eh_confidencial(spec):
+    return str(spec.get("classificacao") or "").strip().lower() == "confidencial"
+
+
+def marca_confidencial(sz=8):
+    return run("CONFIDENCIAL", sz=sz, b=True, cor=COR_CONFIDENCIAL) + run("  ·  ", sz=sz, cor=sec("404040"))
+
+
 def pagina_x_de_y(sz=8, cor="404040", b=False):
     return run("Página ", sz=sz, cor=cor, b=b) + campo("PAGE", "1", sz=sz, cor=cor, b=b) + run(" de ", sz=sz, cor=cor, b=b) + campo("NUMPAGES", "1", sz=sz, cor=cor, b=b)
 
@@ -576,7 +590,8 @@ def linhas_controle(ctx, spec):
     texto = est["rodape"]
     if spec["estado"] == "OFICIAL" and spec.get("aprovado_por"):
         texto = f'Aprovado por {spec["aprovado_por"]} em {spec.get("data_aprovacao", "")}. ' + texto
-    linha1 = par(marca(ctx, spec) + run(codigo_versao(spec) + "  ·  ", sz=8, cor=sec("404040")) + pagina_x_de_y(sz=8, cor=cor_texto(), b=True),
+    linha1 = par(marca(ctx, spec) + run(codigo_versao(spec) + "  ·  ", sz=8, cor=sec("404040"))
+                 + (marca_confidencial() if eh_confidencial(spec) else "") + pagina_x_de_y(sz=8, cor=cor_texto(), b=True),
                  jc="center", antes=80, depois=0, linha=240, estilo="Rodape")
     linha2 = par(run(texto, sz=7.5, cor=est["cor"] if spec["estado"] != "OFICIAL" else sec("404040"), b=spec["estado"] != "OFICIAL"),
                  jc="center", antes=0, depois=0, linha=240, estilo="Rodape")
@@ -1240,6 +1255,22 @@ def validar(spec):
         if not t.get("corpo"):
             raise SystemExit(f'Telegrama {i} ("{t["titulo"]}") sem texto: informe o \'corpo\'.')
     spec["classificacao"] = spec.get("classificacao") or "Interno"
+    acesso = spec.get("acesso_restrito")
+    if isinstance(acesso, (list, tuple)):
+        acesso = ", ".join(str(a).strip() for a in acesso if str(a).strip())
+    acesso = re.sub(r"\s+", " ", str(acesso or "")).strip()
+    if eh_confidencial(spec):
+        spec["classificacao"] = "Confidencial"
+        if acesso:
+            spec["acesso_restrito"] = acesso
+        elif spec["estado"] == "OBSOLETO":
+            spec.pop("acesso_restrito", None)
+            av.append("Documento confidencial sem a lista de quem pode ler: a cópia obsoleta sai sem ela.")
+        else:
+            raise SystemExit("Documento confidencial precisa dizer quem pode ler: informe 'acesso_restrito' "
+                             "(nomes ou cargos, separados por vírgula; por exemplo, 'Diretoria, Fulano de Tal').")
+    else:
+        spec.pop("acesso_restrito", None)
     spec["local"] = spec.get("local") or dado("cidade")
     return av
 
@@ -1275,7 +1306,7 @@ def cabecalho_telegrama(ctx, spec):
     est = ESTADOS[spec["estado"]]
     sep = run("  ·  ", sz=8, cor=sec("404040"))
     return par(marca(ctx, spec, MARCA_A5) + run(codigo_versao(spec), sz=8, cor=sec("404040")) + sep + run(est["rotulo"].upper(), sz=8, b=True, cor=est["cor"])
-               + sep + pagina_x_de_y(sz=8, cor=cor_texto(), b=True), jc="center", antes=0, depois=0, linha=240, estilo="Rodape",
+               + sep + (marca_confidencial() if eh_confidencial(spec) else "") + pagina_x_de_y(sz=8, cor=cor_texto(), b=True), jc="center", antes=0, depois=0, linha=240, estilo="Rodape",
                borda='<w:bottom w:val="single" w:sz="4" w:space="4" w:color="BFBFBF"/>')
 
 
@@ -1331,7 +1362,10 @@ def montar(spec, ativos, paginas_sumario=None):
     if not longo:
         corpo += par(run(tipo_nome.upper() + (f' – {spec["titulo"]}' if spec.get("titulo") else ""), b=True), estilo="TituloDocumento")
         corpo += par(run(f'{spec["codigo"]}  ·  Versão {spec["versao"]}  ·  Emissão {spec["data_emissao"]}  ·  ', sz=9, cor=sec("404040")) +
-                     run(est["rotulo"].upper(), sz=9, b=True, cor=est["cor"]), jc="center", antes=0, depois=240, linha=240, estilo="SemRecuo")
+                     run(est["rotulo"].upper(), sz=9, b=True, cor=est["cor"])
+                     + (('<w:r><w:br/></w:r>' + run("CONFIDENCIAL", sz=9, b=True, cor=COR_CONFIDENCIAL)
+                         + run(f'  ·  Acesso restrito a: {spec.get("acesso_restrito", "")}', sz=9, cor=sec("404040"))) if eh_confidencial(spec) else ""),
+                     jc="center", antes=0, depois=240, linha=240, estilo="SemRecuo")
         if spec.get("identificacao"):
             ident = spec["identificacao"]   # empresa e documento já estão no cabeçalho
             corpo += bloco_campos(ident, larg_t, 3.3)
@@ -1355,7 +1389,7 @@ def montar(spec, ativos, paginas_sumario=None):
                   '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/></w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr>'
                   f'<w:tblGrid>{grade(wqs)}</w:tblGrid><w:tr>')
         for (rot, val), wq in zip(ctab, wqs):
-            cor = est["cor"] if rot == "Estado" else cor_texto()
+            cor = est["cor"] if rot == "Estado" else COR_CONFIDENCIAL if rot == "Classificação" and eh_confidencial(spec) else cor_texto()
             quadro += (f'<w:tc><w:tcPr><w:tcW w:w="{wq}" w:type="dxa"/></w:tcPr>'
                        f'{par(run(rot.upper(), sz=7, cor=sec("595959"), esp=10), jc="center", estilo="TabelaTexto", antes=60)}'
                        f'{par(run(val, b=True, sz=9.5, cor=cor), jc="center", estilo="TabelaTexto", depois=60)}</w:tc>')
@@ -1378,8 +1412,9 @@ def montar(spec, ativos, paginas_sumario=None):
         corpo += par(run("FOLHA DE CONTROLE"), estilo="TituloSumario")
         ident = [["Título", spec["titulo"] + (f' – {spec["subtitulo"]}' if spec.get("subtitulo") else "")],
                  ["Tipo", tipo_nome], ["Código", spec["codigo"]], ["Versão", spec["versao"]],
-                 ["Estado", f'**{est["rotulo"].upper()}**'], ["Classificação", spec["classificacao"]],
-                 ["Área responsável", spec.get("area_nome") or AREAS.get(str(spec.get("area", "")).upper(), spec.get("area", ""))],
+                 ["Estado", f'**{est["rotulo"].upper()}**'], ["Classificação", spec["classificacao"]]]
+        if eh_confidencial(spec): ident.append(["Acesso restrito a", spec.get("acesso_restrito", "")])
+        ident += [["Área responsável", spec.get("area_nome") or AREAS.get(str(spec.get("area", "")).upper(), spec.get("area", ""))],
                  ["Elaborado por", spec.get("elaborado_por", "")], ["Revisado por", spec.get("revisado_por", "")],
                  ["Aprovado por", spec.get("aprovado_por") or "Pendente – documento não aprovado"],
                  ["Data de emissão", spec["data_emissao"]],
@@ -1492,7 +1527,7 @@ def partes_fontes(ctx, fontes):
 
 VERSAO_TIMBRADOR = "2026-11-03"
 CAMPOS_FICHA = ["empresa", "tipo", "area", "area_nome", "numero", "ano", "codigo", "versao", "estado", "variante",
-                "titulo", "subtitulo", "titulo_curto", "classificacao", "local", "data_emissao",
+                "titulo", "subtitulo", "titulo_curto", "classificacao", "acesso_restrito", "local", "data_emissao",
                 "elaborado_por", "revisado_por", "aprovado_por", "cargo_aprovador", "data_aprovacao", "vigencia",
                 "substitui", "substituido_por", "motivo_obsoleto", "identificacao", "historico",
                 "modelo", "com_assinatura", "envolvidos", "assinatura_formato", "assinaturas_previstas",
@@ -1960,7 +1995,7 @@ def ler_timbrado(caminho, pasta_midia=None):
         if jc in ("center", "right"): b["alinhar"] = jc
         alvo().append(b)
 
-    mapa = {"Título": "titulo", "Classificação": "classificacao", "Área responsável": "area_nome", "Elaborado por": "elaborado_por",
+    mapa = {"Título": "titulo", "Classificação": "classificacao", "Acesso restrito a": "acesso_restrito", "Área responsável": "area_nome", "Elaborado por": "elaborado_por",
             "Revisado por": "revisado_por", "Aprovado por": "aprovado_por", "Data de emissão": "data_emissao", "Substitui": "substitui",
             "Substituído por": "substituido_por", "Motivo da obsolescência": "motivo_obsoleto"}
     for rot, chave in mapa.items():

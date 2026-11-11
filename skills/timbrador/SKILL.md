@@ -93,7 +93,7 @@ Depois, gere a versão de arquivo único com `--embutir-logos marca.json --saida
 
 **Nome do arquivo**: `CÓDIGO_vVERSÃO_ESTADO_titulo.docx` (barra do código vira hífen).
 
-**Classificação**: Público, Interno (padrão), Confidencial.
+**Classificação**: Público, Interno (padrão), Confidencial. Confidencial exige `acesso_restrito` (nomes ou cargos, separados por vírgula: quem pode ler); a palavra CONFIDENCIAL sai na linha de controle de todas as páginas, inclusive nos telegramas, e a lista de acesso aparece abaixo do título (curto) ou na folha de controle (longo). Na página, com Confidencial marcado, nada do documento fica guardado no navegador (rascunho e anexos).
 
 Quadro A – Tipos padrão (a variante define o formato; `tipos_extra` do marca.json acrescenta outros e `tipos_ativos` limita os de documento novo)
 
@@ -145,7 +145,7 @@ Exemplo de abertura: `testes/espec-rel.json`. Na página, o relatório novo se a
   "tipo": "POP", "area": "ECO", "numero": 3, "ano": 2026,
   "titulo": "Cadastro de anúncios", "subtitulo": "opcional", "titulo_curto": "opcional, rodapé das páginas internas",
   "estado": "MINUTA", "versao": "1.0-r1", "data_emissao": "15/09/2026",
-  "classificacao": "Interno", "area_nome": "opcional, sobrescreve o nome da área", "projeto": "opcional; obrigatório no PLN",
+  "classificacao": "Interno", "acesso_restrito": "só se Confidencial", "area_nome": "opcional, sobrescreve o nome da área", "projeto": "opcional; obrigatório no PLN",
   "elaborado_por": "", "revisado_por": "", "aprovado_por": "", "cargo_aprovador": "", "data_aprovacao": "",
   "vigencia": "", "substitui": "", "substituido_por": "", "motivo_obsoleto": "",
   "identificacao": [["Destinatário", "..."], ["Assunto", "..."]],

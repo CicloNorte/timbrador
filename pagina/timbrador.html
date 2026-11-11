@@ -447,6 +447,11 @@
         <div><label for="elaborado_por">Elaborado por</label><input type="text" id="elaborado_por"></div>
         <div><label for="classificacao">Classificação</label><select id="classificacao"><option>Interno</option><option>Público</option><option>Confidencial</option></select></div>
       </div>
+      <div id="bloco-acesso" hidden>
+        <label for="acesso_restrito">Acesso restrito a * <span class="dica">(nomes ou cargos, separados por vírgula)</span></label>
+        <input type="text" id="acesso_restrito" placeholder="Ex.: Diretoria, Fulano de Tal">
+        <p class="dica">Documento confidencial: CONFIDENCIAL sai em todas as páginas, e nada dele fica guardado neste navegador. Se recarregar a página, o que está na tela se perde.</p>
+      </div>
     </details>
 
     <div class="acoes"><button type="button" class="secundario" id="visualizar" disabled>Visualizar</button><button id="gerar" disabled>Gerar documento timbrado</button></div>
@@ -811,6 +816,11 @@ const logosDoGrupo = (ctx, parte, alturaCm) => EMPRESAS_DO_GRUPO.map(k => EMPRES
 const rodapeLogo = (ctx, parte) => par(EMPRESA.grupo ? logosDoGrupo(ctx, parte, 1.0) : EMPRESA.sem_logo ? "" : logoInline(ctx, parte, 1.3),
   { jc: "center", antes: 0, depois: 0, linha: 240, estilo: "Rodape", borda: `<w:top w:val="single" w:sz="12" w:space="6" w:color="${EMPRESA.cor}"/>` });
 const codigoVersao = spec => `${spec.codigo}  ·  v${spec.versao}`;
+// Documento confidencial: só as pessoas nomeadas nele ou autorizadas pela direção. CONFIDENCIAL vai na linha de
+// controle de todas as páginas, e quem pode ler aparece abaixo do título (curto) ou na folha de controle (longo).
+const COR_CONFIDENCIAL = "C00000";
+const ehConfidencial = spec => String((spec && spec.classificacao) || "").trim().toLowerCase() === "confidencial";
+const marcaConfidencial = (sz = 8) => run("CONFIDENCIAL", { sz, b: true, cor: COR_CONFIDENCIAL }) + run("  ·  ", { sz, cor: sec("404040") });
 const paginaXdeY = (k = { sz: 8, cor: "404040" }) => run("Página ", k) + campo("PAGE", "1", k) + run(" de ", k) + campo("NUMPAGES", "1", k);
 
 function linhasControle(ctx, spec) {
@@ -819,7 +829,8 @@ function linhasControle(ctx, spec) {
   if (spec.estado === "OFICIAL" && spec.aprovado_por) texto = `Aprovado por ${spec.aprovado_por} em ${spec.data_aprovacao || ""}. ` + texto;
   const o = { jc: "center", antes: 0, depois: 0, linha: 240, estilo: "Rodape" };
   const oficial = spec.estado === "OFICIAL";
-  return par(marca(ctx, spec) + run(codigoVersao(spec) + "  ·  ", { sz: 8, cor: sec("404040") }) + paginaXdeY({ sz: 8, cor: corTexto(), b: true }), { ...o, antes: 80 }) +
+  return par(marca(ctx, spec) + run(codigoVersao(spec) + "  ·  ", { sz: 8, cor: sec("404040") }) + (ehConfidencial(spec) ? marcaConfidencial() : "") +
+    paginaXdeY({ sz: 8, cor: corTexto(), b: true }), { ...o, antes: 80 }) +
     par(run(texto, { sz: 7.5, cor: oficial ? sec("404040") : est.cor, b: !oficial }), o) +
     par(run(identificacaoEmpresa(), { sz: 7.5, cor: sec("7F7F7F") }), { ...o, borda: '<w:bottom w:val="single" w:sz="4" w:space="4" w:color="BFBFBF"/>' });
 }
@@ -1333,6 +1344,15 @@ function validar(spec) {
   spec.versao = v;
   spec.data_emissao = spec.data_emissao || hojeBR();
   spec.classificacao = spec.classificacao || "Interno";
+  { let acesso = spec.acesso_restrito;
+    if (Array.isArray(acesso)) acesso = acesso.map(a => String(a).trim()).filter(Boolean).join(", ");
+    acesso = String(acesso || "").replace(/\s+/g, " ").trim();
+    if (ehConfidencial(spec)) {
+      spec.classificacao = "Confidencial";
+      if (acesso) spec.acesso_restrito = acesso;
+      else if (spec.estado === "OBSOLETO") { delete spec.acesso_restrito; avisos.push("Documento confidencial sem a lista de quem pode ler: a cópia obsoleta sai sem ela."); }
+      else erros.push({ campo: "acesso_restrito", msg: "Documento confidencial precisa dizer quem pode ler: preencha \"Acesso restrito a\" (nomes ou cargos, separados por vírgula)." });
+    } else delete spec.acesso_restrito; }
   spec.local = spec.local || dado("cidade");
   if (!spec.titulo) erros.push({ campo: "titulo", msg: "Informe o título do documento." });
   return { erros, avisos };
@@ -1392,7 +1412,7 @@ function secaoTelegrama(hRid, fRid) {
 function cabecalhoTelegrama(ctx, spec) {
   const est = ESTADOS[spec.estado], sep = run("  ·  ", { sz: 8, cor: sec("404040") });
   return par(marca(ctx, spec, MARCA_A5) + run(codigoVersao(spec), { sz: 8, cor: sec("404040") }) + sep + run(est.rotulo.toUpperCase(), { sz: 8, b: true, cor: est.cor }) +
-    sep + paginaXdeY({ sz: 8, cor: corTexto(), b: true }), { jc: "center", antes: 0, depois: 0, linha: 240, estilo: "Rodape", borda: '<w:bottom w:val="single" w:sz="4" w:space="4" w:color="BFBFBF"/>' });
+    sep + (ehConfidencial(spec) ? marcaConfidencial() : "") + paginaXdeY({ sz: 8, cor: corTexto(), b: true }), { jc: "center", antes: 0, depois: 0, linha: 240, estilo: "Rodape", borda: '<w:bottom w:val="single" w:sz="4" w:space="4" w:color="BFBFBF"/>' });
 }
 // Fecha a última seção do documento. Com telegramas, ela fecha num parágrafo vazio e os telegramas seguem em A5, numa seção só, um por página.
 function fecharComTelegramas(ctx, spec, sect, partes, D) {
@@ -1419,7 +1439,9 @@ function montar(spec, conteudo) {
   if (!longo) {
     corpo += par(run(tipoNome.toUpperCase() + (spec.titulo ? ` – ${spec.titulo}` : ""), { b: true }), { estilo: "TituloDocumento" });
     corpo += par(run(`${spec.codigo}  ·  Versão ${spec.versao}  ·  Emissão ${spec.data_emissao}  ·  `, { sz: 9, cor: sec("404040") }) +
-      run(est.rotulo.toUpperCase(), { sz: 9, b: true, cor: est.cor }), { jc: "center", antes: 0, depois: 240, linha: 240, estilo: "SemRecuo" });
+      run(est.rotulo.toUpperCase(), { sz: 9, b: true, cor: est.cor }) +
+      (ehConfidencial(spec) ? "<w:r><w:br/></w:r>" + run("CONFIDENCIAL", { sz: 9, b: true, cor: COR_CONFIDENCIAL }) +
+        run(`  ·  Acesso restrito a: ${spec.acesso_restrito || ""}`, { sz: 9, cor: sec("404040") }) : ""), { jc: "center", antes: 0, depois: 240, linha: 240, estilo: "SemRecuo" });
     // empresa e documento já estão no cabeçalho
     if (spec.identificacao && spec.identificacao.length) corpo += blocoCampos(spec.identificacao, largT, 3.3);
     corpo += blocos(ctx, conteudo, D, largT, false);
@@ -1439,7 +1461,7 @@ function montar(spec, conteudo) {
       `<w:bottom w:val="single" w:sz="6" w:space="0" w:color="000000"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/></w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr><w:tblGrid>${grade(wqs)}</w:tblGrid><w:tr>`;
     ctab.forEach(([rot, val], k) => quadro += `<w:tc><w:tcPr><w:tcW w:w="${wqs[k]}" w:type="dxa"/></w:tcPr>` +
       par(run(rot.toUpperCase(), { sz: 7, cor: sec("595959"), esp: 10 }), { jc: "center", estilo: "TabelaTexto", antes: 60 }) +
-      par(run(val, { b: true, sz: 9.5, cor: rot === "Estado" ? est.cor : corTexto() }), { jc: "center", estilo: "TabelaTexto", depois: 60 }) + "</w:tc>");
+      par(run(val, { b: true, sz: 9.5, cor: rot === "Estado" ? est.cor : rot === "Classificação" && ehConfidencial(spec) ? COR_CONFIDENCIAL : corTexto() }), { jc: "center", estilo: "TabelaTexto", depois: 60 }) + "</w:tc>");
     quadro += "</w:tr></w:tbl>";
     const base = cp(run(spec.local, { b: true })) + cp(run(spec.data_emissao.slice(-4), { b: true }));
     corpo += `<w:tbl><w:tblPr><w:tblW w:w="${largT}" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblCellMar><w:left w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr>` +
@@ -1453,7 +1475,7 @@ function montar(spec, conteudo) {
 
     corpo += par(run("FOLHA DE CONTROLE"), { estilo: "TituloSumario" });
     corpo += blocoCampos([["Título", spec.titulo + (spec.subtitulo ? ` – ${spec.subtitulo}` : "")], ["Tipo", tipoNome], ["Código", spec.codigo], ["Versão", spec.versao],
-      ["Estado", `**${est.rotulo.toUpperCase()}**`], ["Classificação", spec.classificacao],
+      ["Estado", `**${est.rotulo.toUpperCase()}**`], ["Classificação", spec.classificacao], ...(ehConfidencial(spec) ? [["Acesso restrito a", spec.acesso_restrito || ""]] : []),
       ["Área responsável", spec.area_nome || AREAS[String(spec.area || "").toUpperCase()] || spec.area || ""],
       ["Elaborado por", spec.elaborado_por || ""], ["Revisado por", spec.revisado_por || ""], ["Aprovado por", spec.aprovado_por || "Pendente – documento não aprovado"],
       ["Data de emissão", spec.data_emissao], ["Vigência", spec.estado === "OBSOLETO" ? "Encerrada" : (spec.vigencia || "A partir da aprovação")]]
@@ -1536,7 +1558,7 @@ const VERSAO_TIMBRADOR = "2026-11-03";
 // dos documentos emitidos antes do white label.
 const NS_FICHA = "urn:timbrador:ficha", MARCA_FICHA = "timbrador:ficha";
 const CAMPOS_FICHA = ["empresa", "tipo", "area", "area_nome", "numero", "ano", "codigo", "versao", "estado", "variante", "titulo", "subtitulo", "titulo_curto",
-  "classificacao", "local", "data_emissao", "elaborado_por", "revisado_por", "aprovado_por", "cargo_aprovador", "data_aprovacao", "vigencia",
+  "classificacao", "acesso_restrito", "local", "data_emissao", "elaborado_por", "revisado_por", "aprovado_por", "cargo_aprovador", "data_aprovacao", "vigencia",
   "substitui", "substituido_por", "motivo_obsoleto", "identificacao", "historico", "modelo", "com_assinatura", "envolvidos", "assinatura_formato",
   "assinaturas_previstas", "com_anexos", "anexos_externos", "projeto", "plano", "rodadas"];
 function fichaDe(spec) {
@@ -2299,7 +2321,7 @@ async function lerTimbrado(ler, nomes, doc, numDoc, h) {
     if (jc === "center" || jc === "right") b.alinhar = jc;
     alvo().push(b);
   }
-  const mapa = { "Título": "titulo", "Classificação": "classificacao", "Área responsável": "area_nome", "Elaborado por": "elaborado_por", "Revisado por": "revisado_por",
+  const mapa = { "Título": "titulo", "Classificação": "classificacao", "Acesso restrito a": "acesso_restrito", "Área responsável": "area_nome", "Elaborado por": "elaborado_por", "Revisado por": "revisado_por",
     "Aprovado por": "aprovado_por", "Data de emissão": "data_emissao", "Substitui": "substitui", "Substituído por": "substituido_por" };
   for (const [rot, k] of Object.entries(mapa)) { const v = controle[rot]; if (v && !v.startsWith("Pendente") && !(k in spec)) spec[k] = v; }
   if (info.origem !== "ficha" && spec.titulo && spec.titulo.includes(" – ") && !spec.subtitulo) { const [t, st] = spec.titulo.split(" – "); spec.titulo = t; spec.subtitulo = st; }
@@ -2932,7 +2954,7 @@ function cabecalhoPdf(pg, spec, total, margEsq) {
   if (spec.estado === "OFICIAL" && spec.aprovado_por) texto = `Aprovado por ${spec.aprovado_por} em ${spec.data_aprovacao || ""}. ` + texto;
   const oficial = spec.estado === "OFICIAL";
   const pars = [
-    parPdf("Rodape", [tr(codigoVersao(spec) + "  ·  ", { sz: 8, cor: sec("404040") }), tr(`Página ${pg.indice + 1} de ${total}`, { sz: 8, cor: corTexto(), b: true })], { jc: "center", antes: 4 }),
+    parPdf("Rodape", [tr(codigoVersao(spec) + "  ·  ", { sz: 8, cor: sec("404040") })].concat(confidencialPdf(spec)).concat([tr(`Página ${pg.indice + 1} de ${total}`, { sz: 8, cor: corTexto(), b: true })]), { jc: "center", antes: 4 }),
     parPdf("Rodape", [tr(texto, { sz: 7.5, cor: oficial ? sec("404040") : est.cor, b: !oficial })], { jc: "center" }),
     parPdf("Rodape", [tr(identificacaoEmpresa(), { sz: 7.5, cor: sec("7F7F7F") })], { jc: "center", bordaBase: { w: 0.5, esp: 4, cor: "BFBFBF" } })];
   let y = y0 + hf;
@@ -2987,11 +3009,12 @@ function marcaDaguaPdf(spec, pg) {
   const cx = L / 2, cy = A / 2, x = cx - (w / 2) * c + (h / 2) * c, y = cy - (w / 2) * c - (h / 2) * c;
   return `BT /F2 ${numPdf(sz)} Tf ${corPdf(est.claro)} rg 0 Tc ${numPdf(c)} ${numPdf(c)} ${numPdf(-c)} ${numPdf(c)} ${numPdf(x)} ${numPdf(y)} Tm (${textoPdf(cs)}) Tj ET`;
 }
+const confidencialPdf = (spec, sz = 8) => ehConfidencial(spec) ? [tr("CONFIDENCIAL", { sz, b: true, cor: COR_CONFIDENCIAL }), tr("  ·  ", { sz, cor: sec("404040") })] : [];
 // a linha do topo do telegrama: código e versão, estado na cor dele e página, com um filete embaixo
 function cabecalhoTelegramaPdf(pg, spec, total) {
   const est = ESTADOS[spec.estado], x0 = MARG_TELEGRAMA[3] * PT_CM, larg = (14.8 - MARG_TELEGRAMA[1] - MARG_TELEGRAMA[3]) * PT_CM;
   const P = parPdf("Rodape", [tr(codigoVersao(spec) + "  ·  ", { sz: 8, cor: sec("404040") }), tr(est.rotulo.toUpperCase(), { sz: 8, b: true, cor: est.cor }),
-    tr(`  ·  Página ${pg.indice + 1} de ${total}`, { sz: 8, cor: corTexto(), b: true })], { jc: "center", bordaBase: { w: 0.5, esp: 4, cor: "BFBFBF" } });
+    tr("  ·  ", { sz: 8, cor: sec("404040") })].concat(confidencialPdf(spec)).concat([tr(`Página ${pg.indice + 1} de ${total}`, { sz: 8, cor: corTexto(), b: true })]), { jc: "center", bordaBase: { w: 0.5, esp: 4, cor: "BFBFBF" } });
   let y = 0.8 * PT_CM; for (const r of medirPar(P, larg).rows) { r.desenhar(pg, x0, y); y += r.h; }
 }
 const bordaPaginaPdf = () => { const d = 28; return `0.75 w 0 0 0 RG ${d} ${d} ${numPdf(PAG_L - 2 * d)} ${numPdf(PAG_A - 2 * d)} re S`; };
@@ -3129,7 +3152,9 @@ async function gerarPdf(spec, conteudo) {
   if (!longo) {
     blocos.push(blocoPar(parPdf("TituloDocumento", [tr(tipoNome.toUpperCase() + (spec.titulo ? ` – ${spec.titulo}` : ""), { b: true })]), larg));
     blocos.push(blocoPar(parPdf("SemRecuo", [tr(`${spec.codigo}  ·  Versão ${spec.versao}  ·  Emissão ${spec.data_emissao}  ·  `, { sz: 9, cor: sec("404040") }),
-      tr(est.rotulo.toUpperCase(), { sz: 9, b: true, cor: est.cor })], { jc: "center", antes: 0, depois: 12, linha: 1 }), larg));
+      tr(est.rotulo.toUpperCase(), { sz: 9, b: true, cor: est.cor })], { jc: "center", antes: 0, depois: ehConfidencial(spec) ? 0 : 12, linha: 1 }), larg));
+    if (ehConfidencial(spec)) blocos.push(blocoPar(parPdf("SemRecuo", [tr("CONFIDENCIAL", { sz: 9, b: true, cor: COR_CONFIDENCIAL }),
+      tr(`  ·  Acesso restrito a: ${spec.acesso_restrito || ""}`, { sz: 9, cor: sec("404040") })], { jc: "center", antes: 0, depois: 12, linha: 1 }), larg));
     if (spec.identificacao && spec.identificacao.length) blocos.push(...camposPdf(spec.identificacao, larg, 3.3));
     blocos.push(...blocosPdf(cx, conteudo, larg, false));
     paginarPdf(blocos, abrir("timbrado", MARG_TIMBRADO), larg, x0);
@@ -3138,7 +3163,7 @@ async function gerarPdf(spec, conteudo) {
     const largA = (21 - MARG_ABNT[1] - MARG_ABNT[3]) * PT_CM, xA = MARG_ABNT[3] * PT_CM;
     blocos.push(blocoPar(parPdf("TituloSumario", [tr("FOLHA DE CONTROLE")]), largA));
     blocos.push(...camposPdf([["Título", spec.titulo + (spec.subtitulo ? ` – ${spec.subtitulo}` : "")], ["Tipo", tipoNome], ["Código", spec.codigo], ["Versão", spec.versao],
-      ["Estado", `**${est.rotulo.toUpperCase()}**`], ["Classificação", spec.classificacao],
+      ["Estado", `**${est.rotulo.toUpperCase()}**`], ["Classificação", spec.classificacao], ...(ehConfidencial(spec) ? [["Acesso restrito a", spec.acesso_restrito || ""]] : []),
       ["Área responsável", spec.area_nome || AREAS[String(spec.area || "").toUpperCase()] || spec.area || ""],
       ["Elaborado por", spec.elaborado_por || ""], ["Revisado por", spec.revisado_por || ""], ["Aprovado por", spec.aprovado_por || "Pendente – documento não aprovado"],
       ["Data de emissão", spec.data_emissao], ["Vigência", spec.estado === "OBSOLETO" ? "Encerrada" : (spec.vigencia || "A partir da aprovação")]]
@@ -3202,7 +3227,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   const quadro = tabelaPdf({ larguras: wqs, bordas: { topo: lPdf(0.75), base: lPdf(0.75), v: lPdf(0.5, "BFBFBF") },
     linhas: [{ celulas: ctab.map(([rot, val]) => ({ pars: [
       parPdf("TabelaTexto", [tr(rot.toUpperCase(), { sz: 7, cor: sec("595959"), esp: 0.5 })], { jc: "center", antes: 3 }),
-      parPdf("TabelaTexto", [tr(val, { b: true, sz: 9.5, cor: rot === "Estado" ? est.cor : corTexto() })], { jc: "center", depois: 3 })] })) }] });
+      parPdf("TabelaTexto", [tr(val, { b: true, sz: 9.5, cor: rot === "Estado" ? est.cor : rot === "Classificação" && ehConfidencial(spec) ? COR_CONFIDENCIAL : corTexto() })], { jc: "center", depois: 3 })] })) }] });
   const fim = medirPar(cp([], { linha: 1 }), larg);
   let h = 0, dep = 0;
   const pilha = [...meio.map(m => ({ m })), { t: quadro }, { m: fim }];
@@ -4058,6 +4083,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     if (f.titulo) $("titulo").value = f.titulo;
     $("elaborado_por").value = f.elaborado_por || "";
     if (f.classificacao) { garantirOpcao("classificacao", f.classificacao); $("classificacao").value = f.classificacao; }
+    $("acesso_restrito").value = f.acesso_restrito || ""; mostrarAcesso();
     // projeto: o da ficha; documento antigo, sem o campo, herda o da pasta registrada na lista mestra
     { const reg = lista && f.codigo ? listaNormalizar(lista).documentos.find(d => d.codigo === f.codigo) : null;
       $("projeto").value = f.projeto || (reg && (projetoDaPasta(reg.pasta) || reg.projeto)) || ""; }
@@ -4277,6 +4303,9 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   $("com_telegramas").addEventListener("change", () => { const com = $("com_telegramas").checked; $("bloco-telegramas").hidden = !com; if (com && !telegramasSel.length) addTelegrama(); });
   $("add-telegrama").addEventListener("click", () => { addTelegrama(); agendarRascunho(); });
   usarTelegramas([], false);
+  // Confidencial: pede quem pode ler (vai na página e na folha de controle) e avisa que nada fica no navegador.
+  function mostrarAcesso() { $("bloco-acesso").hidden = $("classificacao").value !== "Confidencial"; }
+  $("classificacao").addEventListener("change", mostrarAcesso);
   // Os arquivos dos anexos não cabem no rascunho comum: ficam no IndexedDB deste navegador, achados pela impressão digital.
   // Banco próprio ("timbrador-anexos"): o "timbrador" guarda a pasta lembrada e já existe nos navegadores de quem usa.
   const abrirIDB = () => new Promise((ok, erro) => {
@@ -4285,6 +4314,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   });
   async function guardarArquivosAnexos() {
     try {
+      if (telaConfidencial()) { await apagarArquivosAnexos(); return; }
       const db = await abrirIDB();
       await new Promise(ok => {
         const tx = db.transaction("arquivos", "readwrite");
@@ -4292,6 +4322,12 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
         tx.oncomplete = tx.onerror = tx.onabort = () => ok();
       });
     } catch (e) { /* sem IndexedDB: ao recarregar, os anexos novos precisam ser escolhidos de novo */ }
+  }
+  async function apagarArquivosAnexos() {
+    try {
+      const db = await abrirIDB();
+      await new Promise(ok => { const tx = db.transaction("arquivos", "readwrite"); tx.objectStore("arquivos").delete("anexos-rascunho"); tx.oncomplete = tx.onerror = tx.onabort = () => ok(); });
+    } catch (e) { /* sem IndexedDB: nada guardado */ }
   }
   async function lerArquivosAnexos() {
     try {
@@ -4460,7 +4496,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   };
   const mostrarErros = erros => {
     erros.forEach(e => $(e.campo) && $(e.campo).classList.add("campo-erro"));
-    if (erros.some(e => ["numero", "versao", "titulo"].includes(e.campo))) $("mais").open = true;
+    if (erros.some(e => ["numero", "versao", "titulo", "acesso_restrito"].includes(e.campo))) $("mais").open = true;
     const el = $(erros[0].campo); if (el) el.focus();
     msg("Não foi possível gerar:<ul>" + erros.map(e => `<li>${escH(e.msg)}</li>`).join("") + "</ul>", "erro");
   };
@@ -4486,6 +4522,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
         empresa: $("empresa").value, tipo: $("tipo").value, estado, area: $("area").value, numero: $("numero").value,
         versao: $("versao").value, titulo: $("titulo").value.trim(), data_emissao: data("data_emissao"),
         elaborado_por: $("elaborado_por").value.trim(), classificacao: $("classificacao").value,
+        acesso_restrito: $("classificacao").value === "Confidencial" ? $("acesso_restrito").value.trim() : "",
         aprovado_por: $("aprovado_por").value.trim(),
         data_aprovacao: estado === "OFICIAL" || aprovacaoManual ? data("data_aprovacao") : "",
         com_assinatura: $("com_assinatura").checked, envolvidos: $("com_assinatura").checked ? lerEnvolvidos() : [],
@@ -4771,6 +4808,8 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     "rel-corrige", "rel-plano-versao", "rel-termo", "rel-situacao"];
   const MARCAS_RASCUNHO = ["com_assinatura", "com_anexos", "com_telegramas", "obsoletar_anterior", "retirar_original", "rel-retirar", "rel-conducao"];
   const OPCOES_RASCUNHO = ["empresa", "tipo", "area", "classificacao"];
+  // documento confidencial na tela: não vai para o rascunho nem para o IndexedDB dos anexos
+  function telaConfidencial() { return $("classificacao").value === "Confidencial"; }
   let restaurando = false, timerRascunho = 0;
   const quandoTxt = t => { const d = new Date(t), z = n => String(n).padStart(2, "0"); return `${z(d.getDate())}/${z(d.getMonth() + 1)} às ${z(d.getHours())}:${z(d.getMinutes())}`; };
   function mostrarRascunho(info) {
@@ -4780,6 +4819,13 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   function salvarRascunho() {
     clearTimeout(timerRascunho);
     if (restaurando) return;
+    if (telaConfidencial()) {   // confidencial: nada dele fica no navegador, e o que já estava guardado sai
+      try { localStorage.removeItem(RASCUNHO); } catch (e) { /* sem armazenamento */ }
+      apagarArquivosAnexos();
+      $("bloco-rascunho").hidden = false;
+      $("rascunho-info").textContent = "Documento confidencial: nada fica guardado neste navegador. Se recarregar a página, o que está na tela se perde.";
+      return;
+    }
     const r = { versao: 1, quando: Date.now(), campos: {}, marcas: {}, opcoes: {}, envolvidos: lerEnvolvidos(),
       conteudo, anterior, numeroAuto, soltarTitulo: $("soltar-titulo").textContent,
       datas: { emissao: dataManual ? $("data_emissao").value : "", aprovacao: aprovacaoManual ? $("data_aprovacao").value : "" } };
@@ -4827,6 +4873,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
       usarEnvolvidos(r.envolvidos || [], !!(r.marcas && r.marcas.com_assinatura));
       usarAnexos(r.anexos || [], !!(r.marcas && r.marcas.com_anexos));
       usarTelegramas(r.telegramas || [], !!(r.marcas && r.marcas.com_telegramas));
+      mostrarAcesso();
       // os arquivos dos anexos escolhidos voltam do IndexedDB, pela impressão digital
       if (anexosSel.some(a => !a.nome)) lerArquivosAnexos().then(arqs => {
         for (const a of anexosSel) { const x = !a.nome && arqs.find(y => y.sha256 === a.sha256); if (x) a.file = x.file; }
