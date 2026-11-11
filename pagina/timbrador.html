@@ -451,6 +451,7 @@
         <label for="acesso_restrito">Acesso restrito a * <span class="dica">(nomes ou cargos, separados por vírgula)</span></label>
         <input type="text" id="acesso_restrito" placeholder="Ex.: Diretoria, Fulano de Tal">
         <p class="dica">Documento confidencial: CONFIDENCIAL sai em todas as páginas, e nada dele fica guardado neste navegador. Se recarregar a página, o que está na tela se perde.</p>
+        <p class="dica conf-pasta"><span id="conf-estado"></span> <button type="button" class="acao" id="conf-conectar">Conectar pasta Confidencial</button></p>
       </div>
     </details>
 
@@ -1672,18 +1673,28 @@ function conferirLista(lista, spec, atualizacao) {
   if (!spec.numero) return { erros, avisos };   // minuta sem número: nada a conferir, nada a reservar
   const mesmo = docs.find(d => d.codigo === spec.codigo && d.numero);
   const livre = String(proximoNumero(lista, spec)).padStart(3, "0");
-  if (mesmo && atualizacao && semAcento(mesmo.titulo) !== semAcento(spec.titulo))
+  // a lista não guarda o título do confidencial: o código só serve para a nova versão do próprio documento
+  if (mesmo && mesmo.confidencial && !atualizacao)
+    erros.push({ campo: "numero", msg: `O código ${spec.codigo} já é de um documento confidencial na lista mestra (${mesmo.estado}, v${mesmo.versao}). Use o próximo número livre (${livre}) ou envie aquele documento para gerar a nova versão.` });
+  else if (mesmo && mesmo.confidencial) { /* nova versão do confidencial: nada a comparar */ }
+  else if (mesmo && atualizacao && semAcento(mesmo.titulo) !== semAcento(spec.titulo))
     avisos.push(`O título muda nesta versão: "${mesmo.titulo}" passa a "${spec.titulo}". A lista mestra fica com o novo.`);
   else if (mesmo && semAcento(mesmo.titulo) !== semAcento(spec.titulo))
     erros.push({ campo: "numero", msg: `O código ${spec.codigo} já é "${mesmo.titulo}" na lista mestra (${mesmo.estado}, v${mesmo.versao}). Use o próximo número livre (${livre}) ou envie aquele documento para gerar a nova versão.` });
   else if (mesmo && !atualizacao)
     avisos.push(`${spec.codigo} já estava na lista mestra (v${mesmo.versao}, ${mesmo.estado}): a entrada foi atualizada.`);
-  const homonimo = docs.find(d => d.codigo !== spec.codigo && semAcento(d.titulo) === semAcento(spec.titulo));
+  const homonimo = docs.find(d => d.codigo !== spec.codigo && !d.confidencial && semAcento(d.titulo) === semAcento(spec.titulo));
   if (homonimo) avisos.push(`Já existe ${homonimo.codigo} com o mesmo título ("${homonimo.titulo}"). Confirme se não é o mesmo documento.`);
   return { erros, avisos };
 }
-const registroDe = (spec, arquivo) => ({
-  codigo: spec.codigo, titulo: spec.titulo, empresa: spec.empresa, tipo: spec.tipo, area: spec.area,
+const registroDe = (spec, arquivo) => ehConfidencial(spec) ? {
+  codigo: spec.codigo, titulo: TITULO_CONFIDENCIAL, empresa: spec.empresa, tipo: spec.tipo, area: spec.area,
+  numero: parseInt(spec.numero, 10) || null, ano: spec.ano || null, versao: spec.versao, estado: spec.estado,
+  data: spec.data_aprovacao || spec.data_emissao, confidencial: true,
+  // o resto sai da entrada, inclusive o que ela tinha antes de o documento virar confidencial
+  responsavel: undefined, arquivo: undefined, projeto: undefined, substituido_por: undefined, plano: undefined, encerrado_por: undefined
+} : ({
+  codigo: spec.codigo, titulo: spec.titulo, empresa: spec.empresa, tipo: spec.tipo, area: spec.area, confidencial: undefined,
   numero: parseInt(spec.numero, 10) || null, ano: spec.ano || null, versao: spec.versao, estado: spec.estado,
   data: spec.data_aprovacao || spec.data_emissao, responsavel: spec.elaborado_por || "",
   substituido_por: spec.estado === "OBSOLETO" ? (spec.substituido_por || undefined) : undefined, arquivo,   // só vale para obsoleto
@@ -1718,6 +1729,12 @@ function mesclarLista(lista, registro) {
 }
 const agoraBR = () => { const d = new Date(); const p = n => String(n).padStart(2, "0"); return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`; };
 const listaTexto = lista => JSON.stringify(listaNormalizar(lista), null, 2);
+/* Documento confidencial mora numa pasta chamada Confidencial, com permissão só para quem pode ler. A lista mestra fica na
+   pasta comum, aberta a todos: nela o confidencial é só um esqueleto (código, versão, estado e data), para o número não
+   repetir. Título, responsável, projeto e nome do arquivo não vão para a lista. As varreduras da pasta comum pulam a
+   pasta Confidencial: quem não tem acesso a ela não trava, e quem tem não copia nada dela para a lista. */
+const TITULO_CONFIDENCIAL = "Documento confidencial";
+const ehPastaConfidencial = nome => semAcento(nome) === "confidencial";
 
 /* ======================================================================= relatório de condução (REL)
    Relatório de condução de projeto. Um relatório por projeto, com o número do plano (herdado, não
@@ -1968,6 +1985,7 @@ async function fichaRapida(buf) {
   if (m[5]) spec.ano = +m[5];
   for (const [k, e] of Object.entries(ESTADOS)) if (cab.includes(e.tarja.split("  ·  ")[0])) spec.estado = k;
   if (cab.includes("DOCUMENTO OFICIAL")) spec.estado = "OFICIAL";
+  if (/\bCONFIDENCIAL\b/.test(cab)) spec.classificacao = "Confidencial";
   const mo = /Aprovado por (.+?) em (\d{2}\/\d{2}\/\d{4})/.exec(cab);
   if (mo) { spec.aprovado_por = mo[1].trim(); spec.data_aprovacao = mo[2]; }
   return { spec, origem: "cabecalho" };
@@ -2012,13 +2030,14 @@ async function alertasRel(codigo, spec, emUso, lista, reg) {
   return alertas;
 }
 async function inventariar(dir, lista, aoAndar) {
-  const achados = [], semId = [], ignorados = [], modelos = [], visitadas = new Set();
+  const achados = [], semId = [], ignorados = [], modelos = [], visitadas = new Set(), puladas = [];
   async function andar(handle, caminho) {
     visitadas.add(caminho);
     for await (const [nome, h] of handle.entries()) {
       if (nome.startsWith("~$") || nome.startsWith(".")) continue;
       if (h.kind === "directory") {
         if (PASTAS_IGNORADAS.includes(nome.toLowerCase())) continue;
+        if (ehPastaConfidencial(nome)) { puladas.push(caminho ? `${caminho}/${nome}` : nome); continue; }   // fora da varredura
         await andar(h, caminho ? `${caminho}/${nome}` : nome); continue;
       }
       if (!nome.toLowerCase().endsWith(".docx")) { if (!nome.toLowerCase().endsWith(".json")) ignorados.push(nome); continue; }
@@ -2083,18 +2102,22 @@ async function inventariar(dir, lista, aoAndar) {
     const titulos = [...new Set(itens.map(i => semAcento(i.spec.titulo)).filter(Boolean))];
     if (titulos.length > 1) conflitos.push([codigo, [...new Set(itens.map(i => i.spec.titulo))]]);
     if (itens.length > 1) varias.push([codigo, itens.map(i => `${i.spec.versao} ${i.spec.estado}`)]);
+    for (const m of itens) if (ehConfidencial(m.spec))
+      alertas.push(`${m.nome}: documento confidencial fora da pasta Confidencial (está em ${m.pasta}). Quem tem acesso à pasta comum pode lê-lo: mova-o para a pasta Confidencial.`);
     const reg = registroDe(atual.spec, atual.nome);
     reg.pasta = atual.pasta; reg.origem = atual.origem;
-    if (!reg.projeto && projetoDaPasta(atual.pasta)) reg.projeto = projetoDaPasta(atual.pasta);   // documento antigo, sem o campo na ficha
+    if (!reg.projeto && !reg.confidencial && projetoDaPasta(atual.pasta)) reg.projeto = projetoDaPasta(atual.pasta);   // documento antigo, sem o campo na ficha
     if (itens.length > 1) reg.arquivos = itens.length;
     if (atual.spec.tipo === "REL") { await registroRel(reg, atual.spec); alertas.push(...await alertasRel(codigo, atual.spec, emUso, atualizada, reg)); }
+    if (reg.confidencial && !reg.numero) continue;   // confidencial sem número: não reserva nada, e o esqueleto não diria qual é
     atualizada = mesclarLista(atualizada, reg);
     vistos.add(chaveRegistro(reg));
   }
   // entradas sem arquivo: saem quando a pasta registrada foi varrida (ou é a de Modelos); fora disso, ficam e são avisadas
-  const removidas = [], naoConferidas = [];
+  const removidas = [], naoConferidas = [], confidenciais = [];
   atualizada.documentos = atualizada.documentos.filter(d => {
     if (vistos.has(chaveRegistro(d))) return true;
+    if (d.confidencial) { confidenciais.push(d.codigo); return true; }   // está na pasta Confidencial, que não é varrida
     if (!("pasta" in d)) { naoConferidas.push(`${d.codigo} (sem pasta registrada)`); return true; }
     const p = d.pasta === "." ? "" : String(d.pasta);
     if (p.split("/").some(x => PASTAS_IGNORADAS.includes(x.toLowerCase())) || visitadas.has(p)) {
@@ -2112,7 +2135,7 @@ async function inventariar(dir, lista, aoAndar) {
   const semNumero = achados.filter(a => !a.spec.numero).map(a => `${a.spec.codigo} — ${a.nome}`);
   return { lista: atualizada, relatorio: { docx: achados.length, documentos: Object.keys(porCodigo).length,
     porOrigem: conta("origem"), porTipo: conta("tipo"), porEstado: conta("estado"), conflitos, varias, semId, ignorados, modelos,
-    versoesRuins, semNumero, alertas, removidas, naoConferidas } };
+    versoesRuins, semNumero, alertas, removidas, naoConferidas, confidenciais, puladas } };
 }
 
 /* ======================================================================= ZIP (escrita e leitura, sem bibliotecas) */
@@ -3536,6 +3559,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   let pastaLista = null, caminhoLista = "";           // onde mora o lista-mestra.json dentro da pasta conectada
   let lembrada = null;                                // pasta da última vez, esperando um clique para reconfirmar o acesso
   let mapa = null;                                    // pastas de tipo, Obsoletos e projetos achadas na pasta conectada
+  let pastaConf = null, mapaConf = null, lembradaConf = null;   // pasta Confidencial (só quem pode ler o confidencial tem acesso): o confidencial é gravado nela
   const nomeEstado = k => ESTADOS[k] ? ESTADOS[k].rotulo : String(k || "?");
   const codigoDe = f => f.codigo || `${f.empresa}-${f.tipo}-${f.area}-${f.numero ? String(f.numero).padStart(3, "0") : "XXX"}${TIPOS_CURTOS[f.tipo] && f.ano ? "/" + f.ano : ""}`;
   const refVersao = f => `${codigoDe(f)} v${f.versao}`;
@@ -3591,7 +3615,8 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   let buscando = false;
   async function buscarOriginal() {
     const ref = substituida();
-    if (!pasta || !ref || original || buscando) return;
+    const confB = ehConfidencial(anterior), raizB = confB ? pastaConf : pasta;
+    if (!raizB || !ref || original || buscando) return;
     const m = /^(\S+) v(\S+)$/.exec(ref); if (!m) return;
     const prefixo = `${m[1].replace("/", "-")}_v${m[2]}_OFICIAL_`.toLowerCase();
     const une = (a, b) => a ? `${a}/${b}` : b;
@@ -3599,7 +3624,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     try {
       const achados = [];
       const reg = lista && lista.documentos.find(d => d.codigo === m[1] && d.arquivo && d.arquivo.toLowerCase().startsWith(prefixo));
-      if (reg && mapa) {
+      if (reg && mapa && !confB) {
         const r = await resolver(reg.pasta && reg.pasta !== "." ? reg.pasta : "");
         if (r) try { await r.h.getFileHandle(reg.arquivo); achados.push({ dir: r.h, nome: reg.arquivo, caminho: une(r.caminho, reg.arquivo) }); } catch (e) { /* saiu de lá */ }
       }
@@ -3607,10 +3632,10 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
         const andar = async (h, caminho, prof) => {
           for await (const [nome, f] of h.entries()) {
             if (f.kind === "file" && nome.toLowerCase().startsWith(prefixo) && nome.toLowerCase().endsWith(".docx")) achados.push({ dir: h, nome, caminho: une(caminho, nome) });
-            else if (f.kind === "directory" && prof > 0 && !nome.startsWith(".") && !["obsoletos", "modelos"].includes(semAcento(nome))) await andar(f, une(caminho, nome), prof - 1);
+            else if (f.kind === "directory" && prof > 0 && !nome.startsWith(".") && !["obsoletos", "modelos", "confidencial"].includes(semAcento(nome))) await andar(f, une(caminho, nome), prof - 1);
           }
         };
-        await andar(pasta, "", 5);
+        await andar(raizB, confB ? pastaConf.name : "", 5);
       }
       if (achados.length === 1) await carregarOriginal(await (await achados[0].dir.getFileHandle(achados[0].nome)).getFile(), achados[0]);
       else if (achados.length > 1) $("original-dica").textContent = `Há ${achados.length} arquivos dessa versão na pasta (${achados.map(a => a.caminho).join("; ")}): envie o certo.`;
@@ -3736,7 +3761,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
 
   /* ------------------------------------------------ lista mestra */
   const temPasta = typeof window.showDirectoryPicker === "function";
-  const specAtual = () => ({ empresa: $("empresa").value, tipo: $("tipo").value, area: $("area").value, ano: +($("data_emissao").value || "").slice(0, 4) || new Date().getFullYear(), projeto: projetoCanonico($("projeto").value) });
+  const specAtual = () => ({ classificacao: $("classificacao").value, empresa: $("empresa").value, tipo: $("tipo").value, area: $("area").value, ano: +($("data_emissao").value || "").slice(0, 4) || new Date().getFullYear(), projeto: projetoCanonico($("projeto").value) });
   // O número só é reservado e registrado quando o documento é publicado. Minuta e em aprovação saem com XXX.
   const vaiPublicar = () => ["OFICIAL", "OBSOLETO"].includes($("estado").value);
   // documento ainda sem número: novo, ou minuta/em aprovação lida de um arquivo com código XXX
@@ -3785,22 +3810,22 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     q.onupgradeneeded = () => q.result.createObjectStore(LOJA);
     q.onsuccess = () => ok(q.result); q.onerror = () => erro(q.error);
   });
-  async function guardarPasta(dados) {
+  async function guardarPasta(dados, chave = "ultima") {
     try {
       const db = await abrirBD();
       await new Promise((ok, erro) => {
         const t = db.transaction(LOJA, "readwrite");
-        t.objectStore(LOJA).put(dados, "ultima");
+        t.objectStore(LOJA).put(dados, chave);
         t.oncomplete = ok; t.onerror = () => erro(t.error);
       });
     } catch (e) { /* navegador sem armazenamento: segue sem lembrar */ }
   }
-  async function pastaGuardada() {
+  async function pastaGuardada(chave = "ultima") {
     try {
       const db = await abrirBD();
       return await new Promise((ok, erro) => {
         const t = db.transaction(LOJA, "readonly");
-        const q = t.objectStore(LOJA).get("ultima");
+        const q = t.objectStore(LOJA).get(chave);
         q.onsuccess = () => ok(q.result); q.onerror = () => erro(q.error);
       });
     } catch (e) { return null; }
@@ -3815,7 +3840,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     progresso(`Procurando a lista mestra… ${++pastasLidas} pasta(s) lida(s).`);
     for await (const [nome, h] of dir.entries()) {
       if (h.kind === "file" && nome === LISTA_ARQUIVO) achados.push({ dir, caminho: prefixo || dir.name });
-      else if (h.kind === "directory" && prof > 0 && !nome.startsWith(".")) {
+      else if (h.kind === "directory" && prof > 0 && !nome.startsWith(".") && !ehPastaConfidencial(nome)) {
         achados.push(...await acharListas(h, prefixo ? `${prefixo}/${nome}` : nome, prof - 1));
       }
     }
@@ -3825,7 +3850,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
      ("Políticas (POL)"), Obsoletos e as de projeto (dentro de "Projetos") são procuradas até 3 níveis abaixo.
      A raiz dos documentos é a pasta que reúne mais pastas de tipo; a pasta de tipo que faltar é criada nela. */
   const juntar = (a, b) => a ? `${a}/${b}` : b;
-  async function mapearPastas() {
+  async function mapearDe(raizH) {
     const tipos = {}, pais = new Map(), projetos = [];
     let obsoletos = null, projetosRaiz = null;
     const nivel = c => c.split("/").length;
@@ -3835,7 +3860,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
         if (f.kind !== "directory" || nome.startsWith(".") || nome.startsWith("~$")) continue;
         const c = juntar(caminho, nome), n = semAcento(nome);
         if (n === "obsoletos") { if (!obsoletos || nivel(c) < nivel(obsoletos.caminho)) obsoletos = { h: f, caminho: c, pai: caminho }; continue; }
-        if (n === "modelos") continue;
+        if (n === "modelos" || n === "confidencial") continue;
         if (n === "projetos") {
           if (!projetosRaiz || nivel(c) < nivel(projetosRaiz.caminho)) projetosRaiz = { h: f, caminho: c };
           for await (const [n2, g] of f.entries()) if (g.kind === "directory" && !n2.startsWith(".")) projetos.push({ nome: n2, h: g, caminho: juntar(c, n2) });
@@ -3850,17 +3875,18 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
         if (prof > 1) await andar(f, c, prof - 1);
       }
     }
-    await andar(pasta, "", 3);
-    let raiz = { h: pasta, caminho: "" }, mais = 0;
+    await andar(raizH, "", 3);
+    let raiz = { h: raizH, caminho: "" }, mais = 0;
     for (const v of pais.values()) if (v.n > mais) { mais = v.n; raiz = { h: v.h, caminho: v.caminho }; }
     // Obsoletos só vale se estiver na raiz dos documentos
     if (obsoletos && obsoletos.pai !== raiz.caminho) obsoletos = null;
     projetos.sort((a, b) => a.nome.localeCompare(b.nome, "pt"));
-    mapa = { raiz, tipos, obsoletos, projetos, projetosRaiz };
-    preencherDestinos();
+    return { raiz, tipos, obsoletos, projetos, projetosRaiz };
   }
+  async function mapearPastas() { mapa = await mapearDe(pasta); preencherDestinos(); }
   // caminho registrado na lista mestra: relativo à raiz dos documentos (como o Inventariar grava)
-  const relativo = c => mapa && mapa.raiz.caminho && c.startsWith(mapa.raiz.caminho + "/") ? c.slice(mapa.raiz.caminho.length + 1) : c;
+  const relativoDe = (m, c) => m && m.raiz.caminho && c.startsWith(m.raiz.caminho + "/") ? c.slice(m.raiz.caminho.length + 1) : c;
+  const relativo = c => relativoDe(mapa, c);
   async function resolver(rel) {
     for (const base of [mapa.raiz, { h: pasta, caminho: "" }]) {
       try {
@@ -3873,32 +3899,36 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   }
   // provisorio = só para mostrar na tela: não cria nada
   async function destinoDe(s, obsoleta, provisorio) {
-    if (!mapa) await mapearPastas();
+    const conf = ehConfidencial(s);
+    if (conf && !pastaConf) throw new Error("documento confidencial: conecte a pasta Confidencial para gravá-lo. Na pasta comum ele não é gravado.");
+    if (conf && !mapaConf) mapaConf = await mapearDe(pastaConf);
+    if (!conf && !mapa) await mapearPastas();
+    const M = conf ? mapaConf : mapa;
     if (obsoleta) {
-      if (mapa.obsoletos || provisorio) return mapa.obsoletos || { caminho: juntar(mapa.raiz.caminho, "Obsoletos"), nova: true };
-      const h = await mapa.raiz.h.getDirectoryHandle("Obsoletos", { create: true });
-      return mapa.obsoletos = { h, caminho: juntar(mapa.raiz.caminho, "Obsoletos"), criada: true };
+      if (M.obsoletos || provisorio) return M.obsoletos || { caminho: juntar(M.raiz.caminho, "Obsoletos"), nova: true };
+      const h = await M.raiz.h.getDirectoryHandle("Obsoletos", { create: true });
+      return M.obsoletos = { h, caminho: juntar(M.raiz.caminho, "Obsoletos"), criada: true };
     }
     // documento de projeto (de qualquer tipo): pasta do projeto, em Projetos; projeto novo ganha pasta
     const proj = nomeDePasta(s.projeto);
     if (proj) {
-      const p = mapa.projetos.find(x => semAcento(x.nome) === semAcento(proj));
+      const p = M.projetos.find(x => semAcento(x.nome) === semAcento(proj));
       if (p) return p;
-      const base = mapa.projetosRaiz || { caminho: juntar(mapa.raiz.caminho, "Projetos"), nova: true };
+      const base = M.projetosRaiz || { caminho: juntar(M.raiz.caminho, "Projetos"), nova: true };
       if (provisorio) return { caminho: juntar(base.caminho, proj), nova: true };
-      if (!base.h) { base.h = await mapa.raiz.h.getDirectoryHandle("Projetos", { create: true }); delete base.nova; mapa.projetosRaiz = base; }
+      if (!base.h) { base.h = await M.raiz.h.getDirectoryHandle("Projetos", { create: true }); delete base.nova; M.projetosRaiz = base; }
       const novo = { nome: proj, h: await base.h.getDirectoryHandle(proj, { create: true }), caminho: juntar(base.caminho, proj), criada: true };
-      mapa.projetos.push(novo); preencherDestinos();
+      M.projetos.push(novo); preencherDestinos();
       return novo;
     }
     // nova versão de documento já registrado: fica na pasta da versão vigente, se ela não estiver na raiz
-    const reg = lista && s.codigo && !s.codigo.includes("XXX") && lista.documentos.find(d => d.codigo === s.codigo);
+    const reg = !conf && lista && s.codigo && !s.codigo.includes("XXX") && lista.documentos.find(d => d.codigo === s.codigo);
     if (reg && reg.pasta && reg.pasta !== "." && !/(^|\/)obsoletos$/i.test(reg.pasta)) { const r = await resolver(reg.pasta); if (r) return r; }
-    if (mapa.tipos[s.tipo]) return mapa.tipos[s.tipo];
-    const nome = `${PASTA_DO_TIPO[s.tipo] || s.tipo} (${s.tipo})`, caminho = juntar(mapa.raiz.caminho, nome);
+    if (M.tipos[s.tipo]) return M.tipos[s.tipo];
+    const nome = `${PASTA_DO_TIPO[s.tipo] || s.tipo} (${s.tipo})`, caminho = juntar(M.raiz.caminho, nome);
     if (provisorio) return { caminho, nova: true };
-    const h = await mapa.raiz.h.getDirectoryHandle(nome, { create: true });
-    return mapa.tipos[s.tipo] = { h, caminho, criada: true };
+    const h = await M.raiz.h.getDirectoryHandle(nome, { create: true });
+    return M.tipos[s.tipo] = { h, caminho, criada: true };
   }
   // nome do projeto como está na pasta (ou na lista): "novo site" → "Novo Site"
   function projetoCanonico(t) {
@@ -3922,12 +3952,15 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
       : (["PRO", "TER"].includes(t) && !proj ? "Proposta ou termo de projeto: informe o projeto, para o documento ir para a pasta dele. " : "") +
         "Documento de projeto, de qualquer tipo (inclusive CI), fica na pasta do projeto, em Projetos. Projeto novo: digite o nome, e a pasta é criada.";
     $("salvar-dica").textContent = "";
-    if (!pasta || !mapa) return;
+    if ($("classificacao").value === "Confidencial") {
+      if (!pastaConf) { if (temPasta) $("salvar-dica").textContent = "Documento confidencial: conecte a pasta Confidencial (em Mais opções) para gravá-lo lá. Na pasta comum ele não é gravado."; return; }
+    } else if (!pasta || !mapa) return;
     try {
       const s = specAtual();
       if (anterior && anterior.codigo) s.codigo = anterior.codigo;
       const d = await destinoDe(s, false, true);
-      $("salvar-dica").textContent = `Vai para ${d.caminho || pasta.name}` + (d.nova ? " (a pasta será criada)" : "") +
+      const conf = ehConfidencial(s);
+      $("salvar-dica").textContent = `Vai para ${conf ? juntar(pastaConf.name, d.caminho) : d.caminho || pasta.name}` + (d.nova ? " (a pasta será criada)" : "") +
         ($("com_anexos").checked ? ", numa pasta com o código do documento, junto com os anexos." : ".");
     } catch (e) { $("salvar-dica").textContent = ""; }
   }
@@ -3993,7 +4026,53 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     } catch (e) { /* pasta sumiu ou mudou de lugar: fica como estava */ }
   })();
   $("lista-conectar").addEventListener("click", conectarLista);
-  ["tipo", "empresa", "area", "estado", "projeto"].forEach(id => $(id).addEventListener("change", () => mostrarDestino()));
+  // Pasta Confidencial: conectada à parte, por quem tem acesso a ela. Tem de se chamar Confidencial, para não ser a pasta comum por engano.
+  function mostrarConf() {
+    if (!temPasta) {
+      $("conf-conectar").hidden = true;
+      $("conf-estado").textContent = "Este navegador não grava direto na pasta: o arquivo sai em Downloads. Guarde-o na pasta Confidencial e apague a cópia deste computador.";
+      return;
+    }
+    $("conf-estado").textContent = pastaConf ? `Pasta Confidencial conectada: o documento é gravado em ${pastaConf.name}, nunca na pasta comum.`
+      : lembradaConf ? "A pasta Confidencial ficou guardada: um clique libera o acesso." : "Pasta Confidencial não conectada. Só quem tem acesso a ela consegue conectá-la.";
+    $("conf-conectar").textContent = pastaConf ? "Trocar" : lembradaConf ? "Reconectar pasta Confidencial" : "Conectar pasta Confidencial";
+  }
+  async function usarPastaConf(dir, avisar) {
+    pastaConf = dir; lembradaConf = null; mapaConf = null;
+    try { mapaConf = await mapearDe(dir); } catch (e) { mapaConf = null; }
+    await guardarPasta({ raiz: dir, nome: dir.name }, "confidencial");
+    mostrarConf(); mostrarDestino();
+    if (anterior) atualizarModo();      // a versão substituída de um confidencial é procurada nela
+    if (avisar) msg(`Pasta Confidencial conectada: ${escH(dir.name)}.`, "ok");
+  }
+  async function conectarConf() {
+    $("conf-conectar").disabled = true;
+    try {
+      if (lembradaConf) {
+        if ((await lembradaConf.requestPermission({ mode: "readwrite" })) === "granted") return await usarPastaConf(lembradaConf, true);
+        lembradaConf = null;
+      }
+      const dir = await window.showDirectoryPicker({ id: "timbrador-confidencial", mode: "readwrite" });
+      if (!ehPastaConfidencial(dir.name)) throw new Error(`A pasta escolhida é "${dir.name}": escolha a pasta Confidencial.`);
+      if (dir.requestPermission && (await dir.requestPermission({ mode: "readwrite" })) !== "granted")
+        throw new Error("Sem permissão de gravação na pasta Confidencial.");
+      await usarPastaConf(dir, true);
+    } catch (e) { if (e.name !== "AbortError") msg(escH(e.message), "erro"); mostrarConf(); }
+    finally { $("conf-conectar").disabled = false; }
+  }
+  $("conf-conectar").addEventListener("click", conectarConf);
+  mostrarConf();
+  (async () => {
+    if (!temPasta) return;
+    const g = await pastaGuardada("confidencial");
+    if (!g || !g.raiz || typeof g.raiz.queryPermission !== "function") return;
+    try {
+      const p = await g.raiz.queryPermission({ mode: "readwrite" });
+      if (p === "granted") await usarPastaConf(g.raiz, false);
+      else if (p === "prompt") { lembradaConf = g.raiz; mostrarConf(); }
+    } catch (e) { /* pasta sumiu ou o acesso foi retirado: fica desconectada */ }
+  })();
+  ["tipo", "empresa", "area", "estado", "projeto", "classificacao"].forEach(id => $(id).addEventListener("change", () => mostrarDestino()));
   $("projeto").addEventListener("input", () => mostrarDestino());
   $("projeto").addEventListener("change", () => { const c = projetoCanonico($("projeto").value); if (c && c !== $("projeto").value) $("projeto").value = c; });
   $("lista-inventariar").addEventListener("click", async () => {
@@ -4010,6 +4089,8 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
       const itens = [`Origem dos dados: ${conta(r.porOrigem)}.`, `Por tipo: ${conta(r.porTipo)}.`, `Por estado: ${conta(r.porEstado)}.`];
       for (const a of r.alertas) itens.push(`<strong>Atenção:</strong> ${escH(a)}`);
       if (r.removidas.length) itens.push(`<strong>Saíram da lista</strong> ${r.removidas.length} entrada(s) cujo arquivo não está mais na pasta: ${r.removidas.map(escH).join("; ")}.`);
+      if (r.puladas.length) itens.push(`Pasta Confidencial fora da varredura (${r.puladas.map(escH).join("; ")}): o que está nela não entra na lista mestra, nem o título.`);
+      if (r.confidenciais.length) itens.push(`${r.confidenciais.length} documento(s) confidencial(is) na lista ficaram sem conferir, porque estão na pasta Confidencial: ${r.confidenciais.map(escH).join("; ")}.`);
       if (r.naoConferidas.length) itens.push(`${r.naoConferidas.length} entrada(s) da lista ficaram sem conferir, porque a pasta delas não foi varrida: ${r.naoConferidas.map(escH).join("; ")}.`);
       if (r.varias.length) itens.push(`${r.varias.length} documento(s) com mais de um arquivo: na lista ficou a versão em uso (a oficial mais alta, quando há).`);
       for (const [codigo, titulos] of r.conflitos) itens.push(`<strong>Número repetido:</strong> ${escH(codigo)} aparece com títulos diferentes — ${titulos.map(escH).join(" | ")}.`);
@@ -4336,7 +4417,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     } catch (e) { return []; }
   }
   // Anexo registrado na ficha e que não foi escolhido agora: procura na pasta conectada pelo nome e confere tamanho e SHA-256.
-  async function acharAnexo(it) {
+  async function acharAnexo(it, raiz) {
     let achado = null;
     async function andar(dir, prof) {
       for await (const [nome, h] of dir.entries()) {
@@ -4344,10 +4425,10 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
         if (h.kind === "file" && nome === it.nome) {
           const f = await h.getFile();
           if (f.size === it.tamanho && await sha256Hex(await f.arrayBuffer()) === it.sha256) { achado = f; return; }
-        } else if (h.kind === "directory" && prof > 0 && !nome.startsWith(".")) await andar(h, prof - 1);
+        } else if (h.kind === "directory" && prof > 0 && !nome.startsWith(".") && (raiz || !ehPastaConfidencial(nome))) await andar(h, prof - 1);
       }
     }
-    try { await andar(pasta, 6); } catch (e) { /* sem varredura */ }
+    try { await andar(raiz || pasta, 6); } catch (e) { /* sem varredura */ }
     return achado;
   }
   const lerDaPasta = async (dir, nome) => { try { return await (await dir.getFileHandle(nome)).getFile(); } catch (e) { return null; } };
@@ -4357,7 +4438,8 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   async function planejarAnexos(spec) {
     const erros = [], itens = [], nomeP = nomePastaDoc(spec), versao = String(spec.versao || "").split("-r")[0];
     let dirDoc = null;
-    if (pasta) {
+    const raizA = ehConfidencial(spec) ? pastaConf : pasta;
+    if (raizA) {
       const base = await destinoDe(spec, false, true);
       if (base.h) dirDoc = base.caminho.split("/").pop() === nomeP ? base.h : await base.h.getDirectoryHandle(nomeP).catch(() => null);
     }
@@ -4374,9 +4456,9 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
         }
         it.nome = nome;
       } else if (!(dirDoc && await mesmoConteudo(await lerDaPasta(dirDoc, it.nome), it))) {
-        const achado = pasta ? await acharAnexo(it) : null;
+        const achado = raizA ? await acharAnexo(it, raizA) : null;
         if (achado) it.fonte = achado;
-        else erros.push({ campo: "bloco-anexos", msg: pasta
+        else erros.push({ campo: "bloco-anexos", msg: raizA
           ? `Não achei na pasta o "${it.nome}" com o mesmo conteúdo (tamanho e SHA-256) registrado no documento. Anexe o arquivo de novo.`
           : `"${it.nome}" está registrado no documento, mas não foi escolhido agora: conecte a pasta dos documentos para o Timbrador buscá-lo, ou anexe o arquivo de novo.` });
       }
@@ -4496,7 +4578,7 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
   };
   const mostrarErros = erros => {
     erros.forEach(e => $(e.campo) && $(e.campo).classList.add("campo-erro"));
-    if (erros.some(e => ["numero", "versao", "titulo", "acesso_restrito"].includes(e.campo))) $("mais").open = true;
+    if (erros.some(e => ["numero", "versao", "titulo", "acesso_restrito", "conf-conectar"].includes(e.campo))) $("mais").open = true;
     const el = $(erros[0].campo); if (el) el.focus();
     msg("Não foi possível gerar:<ul>" + erros.map(e => `<li>${escH(e.msg)}</li>`).join("") + "</ul>", "erro");
   };
@@ -4591,6 +4673,8 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     if (!obsoletar && spec.com_anexos && !spec.anexos_externos.length) antes.push({ campo: "bloco-anexos", msg: "Com anexos externos: inclua ao menos um arquivo, ou desmarque a caixa." });
     if (!obsoletar && spec.com_assinatura && !spec.envolvidos.length) antes.push({ campo: "envolvidos", msg: "Com assinatura: informe ao menos um envolvido (nome)." });
     if (lista && vaiPublicar() && !spec.elaborado_por && !obsoletar) antes.push({ campo: "elaborado_por", msg: "Informe quem responde por esta publicação (em Mais opções): vai para a lista mestra." });
+    if (ehConfidencial(spec) && pasta && !pastaConf)
+      antes.push({ campo: "conf-conectar", msg: "Documento confidencial não é gravado na pasta comum: conecte a pasta Confidencial (em Mais opções, logo abaixo de Acesso restrito a) e gere de novo." });
     const { erros, avisos } = validar(spec);
     // validar() tira do título o nome do tipo, como o gerador: a página mostra o título que vai sair
     if (!obsoletar && spec.titulo && spec.titulo !== $("titulo").value.trim()) $("titulo").value = spec.titulo;
@@ -4615,6 +4699,8 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
     const feitos = [[spec, nome, blob]];
     if (querObsoleta) {
       const velha = obsoletoDaAnterior(original.ficha, spec);
+      // conteúdo que passa a ser confidencial: a versão anterior também é, e a cópia obsoleta vai para a pasta Confidencial
+      if (ehConfidencial(spec) && !ehConfidencial(velha)) { velha.classificacao = "Confidencial"; velha.acesso_restrito = velha.acesso_restrito || spec.acesso_restrito; }
       const r = validar(velha);
       if (r.erros.length) extras.push("A versão substituída não pôde ser marcada como obsoleta: " + r.erros.map(e => e.msg).join(" "));
       else {
@@ -4632,19 +4718,19 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
       }
     }
     let saida = "";
-    if (pasta) {
+    if (pasta || (ehConfidencial(spec) && pastaConf)) {
       try {
         const destinos = [];
         let ondePrincipal = null;
         for (const [s, n, b] of feitos) {
           const copia = s !== spec;                      // cópia obsoleta da versão substituída
           let onde = await destinoDe(s, s.estado === "OBSOLETO");
-          if (onde.criada) { extras.push(`Criei a pasta ${onde.caminho}.`); onde.criada = false; }
+          if (onde.criada) { extras.push(`Criei a pasta ${ehConfidencial(s) ? juntar(pastaConf.name, onde.caminho) : onde.caminho}.`); onde.criada = false; }
           if (!copia && planoAnexos) onde = await abrirPastaDoc(onde, planoAnexos.nomeP);   // documento e anexos juntos
           await gravarEm(onde.h, n, b);
-          destinos.push(juntar(onde.caminho, n));
+          destinos.push(ehConfidencial(s) ? juntar(pastaConf.name, juntar(onde.caminho, n)) : juntar(onde.caminho, n));
           if (!copia) ondePrincipal = onde;
-          if (onde.criada) { extras.push(`Criei a pasta ${onde.caminho}.`); onde.criada = false; }
+          if (onde.criada) { extras.push(`Criei a pasta ${ehConfidencial(s) ? juntar(pastaConf.name, onde.caminho) : onde.caminho}.`); onde.criada = false; }
           if (!copia && planoAnexos) {
             const gravar = planoAnexos.itens.filter(it => it.fonte);
             for (const it of gravar) await gravarEm(onde.h, it.nome, it.fonte);
@@ -4654,9 +4740,13 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
           // a cópia obsoleta da versão substituída não entra na lista: a entrada do código aponta a vigente
           // obsoleto substituído por nova versão do mesmo código: a entrada continua apontando a vigente
           const mesmoCodigo = s.estado === "OBSOLETO" && String(s.substituido_por || "").split(" v")[0].trim() === s.codigo;
-          if (vaiPublicar() && !copia && !mesmoCodigo) { const reg = await registroRel(registroDe(s, n), s); reg.pasta = relativo(onde.caminho) || "."; lista = mesclarLista(lista, reg); }
+          if (vaiPublicar() && lista && !copia && !mesmoCodigo) {
+            const reg = await registroRel(registroDe(s, n), s);
+            reg.pasta = ehConfidencial(s) ? juntar(pastaConf.name, relativoDe(mapaConf, onde.caminho)) : relativo(onde.caminho) || ".";
+            lista = mesclarLista(lista, reg);
+          }
         }
-        if (vaiPublicar()) await gravarEm(pastaLista, LISTA_ARQUIVO, listaTexto(lista));
+        if (vaiPublicar() && lista && pastaLista) await gravarEm(pastaLista, LISTA_ARQUIVO, listaTexto(lista));
         saida = `Gravado em: ${destinos.map(escH).join(" e ")}`;
         if (rel && relAnterior()) extras.push(await retirarRelAnterior(ondePrincipal, spec));
         // só retira o oficial anterior depois que a cópia obsoleta foi gravada
@@ -4682,6 +4772,8 @@ function capaPdf(pg, spec, tipoNome, larg, x0) {
         extras.push(`O documento e os anexos saíram juntos em ${p}.zip: descompacte e guarde a pasta ${p} inteira no lugar do documento.`);
       }
       const links = baixados.map(([s, n, b], i) => baixar(b, n, i * 800));
+      if (feitos.some(([s]) => ehConfidencial(s)))
+        extras.push("Documento confidencial: o arquivo ficou em Downloads deste computador. Guarde-o na pasta Confidencial e apague a cópia daqui.");
       if (lista && vaiPublicar()) {
         for (const [s, n] of feitos) lista = mesclarLista(lista, await registroRel(registroDe(s, n), s));
         links.push(baixar(new Blob([listaTexto(lista)], { type: "application/json" }), LISTA_ARQUIVO, feitos.length * 800));

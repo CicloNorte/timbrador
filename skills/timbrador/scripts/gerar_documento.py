@@ -2123,7 +2123,12 @@ def conferir_lista(lista, spec, atualizacao=False):
         avisos.append("Documento sem número: a lista mestra registra, mas reserve o número antes de aprovar.")
         return erros, avisos
     mesmo = next((d for d in lista["documentos"] if d.get("codigo") == codigo and d.get("numero")), None)
-    if mesmo and atualizacao and _sem_acento(mesmo.get("titulo")) != _sem_acento(spec.get("titulo")):
+    if mesmo and mesmo.get("confidencial"):
+        # a lista não guarda o título do confidencial: o código só serve para a nova versão do próprio documento
+        if not atualizacao:
+            erros.append(f'O código {codigo} já é de um documento confidencial na lista mestra ({mesmo.get("estado")}, '
+                         f'v{mesmo.get("versao")}). Use o número {proximo_numero(lista, spec):03d} ou gere a nova versão a partir daquele documento.')
+    elif mesmo and atualizacao and _sem_acento(mesmo.get("titulo")) != _sem_acento(spec.get("titulo")):
         avisos.append(f'O título muda nesta versão: "{mesmo.get("titulo")}" passa a "{spec.get("titulo")}". A lista mestra fica com o novo.')
     elif mesmo and _sem_acento(mesmo.get("titulo")) != _sem_acento(spec.get("titulo")):
         erros.append(f'O código {codigo} já é "{mesmo.get("titulo")}" na lista mestra '
@@ -2131,7 +2136,7 @@ def conferir_lista(lista, spec, atualizacao=False):
                      f'ou gere a nova versão a partir daquele documento.')
     elif mesmo and not atualizacao:
         avisos.append(f'{codigo} já estava na lista mestra (v{mesmo.get("versao")}, {mesmo.get("estado")}): a entrada foi atualizada.')
-    homonimo = next((d for d in lista["documentos"] if d.get("codigo") != codigo
+    homonimo = next((d for d in lista["documentos"] if d.get("codigo") != codigo and not d.get("confidencial")
                      and _sem_acento(d.get("titulo")) == _sem_acento(spec.get("titulo"))), None)
     if homonimo:
         avisos.append(f'Já existe {homonimo.get("codigo")} com o mesmo título ("{homonimo.get("titulo")}"). Confirme se não é o mesmo documento.')
@@ -2149,7 +2154,25 @@ def _mesmo_codigo(substituido_por, spec):
     return bool(alvo) and alvo == codigo
 
 
+# Documento confidencial mora numa pasta chamada Confidencial, com permissão só para quem pode ler. A lista mestra fica na
+# pasta comum, aberta a todos: nela o confidencial é só um esqueleto (código, versão, estado e data), para o número não
+# repetir. Título, responsável, projeto e nome do arquivo não vão para a lista. O inventário da pasta comum pula a pasta
+# Confidencial: quem não tem acesso a ela não trava, e quem tem não copia nada dela para a lista.
+TITULO_CONFIDENCIAL = "Documento confidencial"
+CAMPOS_FORA_DO_CONFIDENCIAL = ("responsavel", "arquivo", "projeto", "substituido_por", "plano", "encerrado_por", "rodadas_sha256")
+
+
+def eh_pasta_confidencial(nome):
+    return _sem_acento(nome) == "confidencial"
+
+
 def registro_de(spec, arquivo):
+    if eh_confidencial(spec):
+        return {"codigo": spec["codigo"], "titulo": TITULO_CONFIDENCIAL, "empresa": spec.get("empresa"),
+                "tipo": spec.get("tipo"), "area": spec.get("area"),
+                "numero": int(spec["numero"]) if str(spec.get("numero") or "").isdigit() else None,
+                "ano": spec.get("ano"), "versao": spec.get("versao"), "estado": spec.get("estado"),
+                "data": spec.get("data_aprovacao") or spec.get("data_emissao"), "confidencial": True}
     reg = {"codigo": spec["codigo"], "titulo": spec.get("titulo", ""), "empresa": spec.get("empresa"),
            "tipo": spec.get("tipo"), "area": spec.get("area"),
            "numero": int(spec["numero"]) if str(spec.get("numero") or "").isdigit() else None,
@@ -2520,6 +2543,8 @@ def ficha_rapida(caminho):
                         spec["estado"] = chave
                 if "DOCUMENTO OFICIAL" in cab:
                     spec["estado"] = "OFICIAL"
+                if re.search(r"\bCONFIDENCIAL\b", cab):
+                    spec["classificacao"] = "Confidencial"
                 mo = re.search(r"Aprovado por (.+?) em (\d{2}/\d{2}/\d{4})", cab)
                 if mo:
                     spec["aprovado_por"], spec["data_aprovacao"] = mo.group(1).strip(), mo.group(2)
@@ -2573,9 +2598,11 @@ def inventariar(pasta, destino=None, gravar=True, ignorar=()):
     """Varre a pasta dos documentos e monta a lista mestra do que já existe."""
     pasta = os.path.abspath(pasta)
     ignorar = [i.lower() for i in (ignorar or ())] + [i for i in PASTAS_IGNORADAS]
-    achados, ignorados, sem_id, listas, modelos, visitadas = [], [], [], [], [], set()
+    achados, ignorados, sem_id, listas, modelos, visitadas, puladas = [], [], [], [], [], set(), []
     for raiz, dirs, arquivos in os.walk(pasta):
-        dirs[:] = sorted(d for d in dirs if d.lower() not in ignorar and not d.startswith("."))
+        rel_r = os.path.relpath(raiz, pasta).replace(os.sep, "/")
+        puladas += [d if rel_r == "." else f"{rel_r}/{d}" for d in dirs if eh_pasta_confidencial(d)]   # fora da varredura
+        dirs[:] = sorted(d for d in dirs if d.lower() not in ignorar and not d.startswith(".") and not eh_pasta_confidencial(d))
         rel_raiz = os.path.relpath(raiz, pasta).replace(os.sep, "/")
         visitadas.add("" if rel_raiz == "." else rel_raiz)
         for nome in sorted(arquivos):
@@ -2686,10 +2713,16 @@ def inventariar(pasta, destino=None, gravar=True, ignorar=()):
         if len(itens) > 1:
             multiplos.append((codigo, [f'{i["spec"].get("versao")} {i["spec"].get("estado")}' for i in itens]))
         spec = atual["spec"]
+        for i in itens:
+            if eh_confidencial(i["spec"]):
+                alertas.append(f'{i["rel"]}: documento confidencial fora da pasta Confidencial (está em {i["pasta"]}). '
+                               "Quem tem acesso à pasta comum pode lê-lo: mova-o para a pasta Confidencial.")
         reg = registro_de(spec, atual["nome"])
         reg["pasta"] = atual["pasta"]
         reg["origem"] = atual["origem"]
-        if not reg.get("projeto") and projeto_da_pasta(atual["pasta"]):   # documento antigo, sem o campo na ficha
+        if reg.get("confidencial") and not reg.get("numero"):
+            continue   # confidencial sem número: não reserva nada, e o esqueleto não diria qual é
+        if not reg.get("confidencial") and not reg.get("projeto") and projeto_da_pasta(atual["pasta"]):   # documento antigo, sem o campo na ficha
             reg["projeto"] = projeto_da_pasta(atual["pasta"])
         if len(itens) > 1:
             reg["arquivos"] = len(itens)
@@ -2698,10 +2731,12 @@ def inventariar(pasta, destino=None, gravar=True, ignorar=()):
         lista = _mesclar_em(lista, reg)
         vistos.add(chave_registro(reg))
     # entradas sem arquivo: saem quando a pasta registrada foi varrida (ou é a de Modelos); fora disso, ficam e são avisadas
-    removidas, nao_conferidas, ficam = [], [], []
+    removidas, nao_conferidas, ficam, confidenciais = [], [], [], []
     for d in lista["documentos"]:
         if chave_registro(d) in vistos:
             ficam.append(d); continue
+        if d.get("confidencial"):   # está na pasta Confidencial, que não é varrida
+            confidenciais.append(d.get("codigo")); ficam.append(d); continue
         if "pasta" not in d:
             nao_conferidas.append(f'{d.get("codigo")} (sem pasta registrada)'); ficam.append(d); continue
         p = "" if d["pasta"] == "." else str(d["pasta"])
@@ -2722,6 +2757,7 @@ def inventariar(pasta, destino=None, gravar=True, ignorar=()):
                  "versoes_fora_do_padrao": versoes_ruins, "sem_numero": sem_numero,
                  "ignorados": ignorados, "modelos": modelos, "sem_identificacao": sem_id, "conflitos": conflitos,
                  "varias_versoes": multiplos, "alertas": alertas, "removidas": removidas, "nao_conferidas": nao_conferidas,
+                 "confidenciais": confidenciais, "pastas_confidenciais": puladas,
                  "por_origem": {o: sum(1 for a in achados if a["origem"] == o) for o in ("ficha", "cabecalho", "nome")},
                  "por_tipo": {}, "por_estado": {}, "listas_encontradas": listas}
     for a in achados:
@@ -2767,6 +2803,9 @@ def _mesclar_em(lista, registro):
     novo = dict(antes or {}, **registro)
     # campos que só valem para a entrada obsoleta não sobrevivem à republicação do código
     for k in ("substituido_por", "motivo_obsoleto"):
+        if k not in registro: novo.pop(k, None)
+    # confidencial: o esqueleto apaga o que a entrada tinha antes; deixou de ser confidencial, a marca sai
+    for k in (CAMPOS_FORA_DO_CONFIDENCIAL if registro.get("confidencial") else ("confidencial",)):
         if k not in registro: novo.pop(k, None)
     novo["registrado_em"] = (antes or {}).get("registrado_em", agora)
     novo["atualizado_em"] = agora
@@ -2988,6 +3027,10 @@ def main():
             print(f"  Saíram da lista {len(r['removidas'])} entrada(s) cujo arquivo não está mais na pasta:")
             for x in r["removidas"]:
                 print(f"    {x}")
+        if r["pastas_confidenciais"]:
+            print("  Pasta Confidencial fora da varredura (" + "; ".join(r["pastas_confidenciais"]) + "): o que está nela não entra na lista, nem o título.")
+        if r["confidenciais"]:
+            print(f"  {len(r['confidenciais'])} documento(s) confidencial(is) na lista ficaram sem conferir (estão na pasta Confidencial): " + "; ".join(r["confidenciais"]))
         if r["nao_conferidas"]:
             print(f"  {len(r['nao_conferidas'])} entrada(s) ficaram sem conferir (pasta não varrida): " + "; ".join(r["nao_conferidas"]))
         if r["varias_versoes"]:
@@ -3123,6 +3166,8 @@ def main():
         if not spec.get("elaborado_por"):
             print("AVISO: sem 'elaborado_por': a lista mestra vai registrar a publicação sem responsável.")
     saida = gerar(spec, ativos, a.saida, a.anexo)
+    if eh_confidencial(spec) and not any(eh_pasta_confidencial(x) for x in os.path.abspath(saida).split(os.sep)[:-1]):
+        print(f"AVISO: documento confidencial gravado fora da pasta Confidencial ({saida}): mova-o para lá e apague esta cópia.")
     if lista is not None:
         lista = gravar_lista(a.lista, registro_de(spec, saida))
         print(f"LISTA MESTRA: {lista_caminho(a.lista)} ({len(lista['documentos'])} documentos)")
